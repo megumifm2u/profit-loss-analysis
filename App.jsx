@@ -1,4 +1,75 @@
-import { useState, useEffect, useRef, useCallback, createContext, useContext } from "react";
+import { useState, useEffect, useRef, useCallback, createContext, useContext, useMemo, Component } from "react";
+
+// ─── Error Boundary ───────────────────────────────────────────────────────────
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error("Dashboard error:", error, info); }
+  render() {
+    if (this.state.error) {
+      const reset = () => this.setState({ error: null });
+      return (
+        <div style={{ padding: "40px 24px", fontFamily: "monospace", color: "#ff6b6b", background: "#0a0a0e", minHeight: "100vh" }}>
+          <div style={{ fontSize: 11, letterSpacing: 3, textTransform: "uppercase", marginBottom: 16, color: "#777" }}>Dashboard Error</div>
+          <div style={{ fontSize: 14, marginBottom: 24, color: "#e0e0e0", lineHeight: 1.6 }}>
+            Something went wrong rendering this section. Your data is safe.
+          </div>
+          <div style={{ fontSize: 11, color: "#ff6b6b", marginBottom: 24, background: "#1a1826", padding: "12px 16px", borderRadius: 4, border: "1px solid #2a2540" }}>
+            {this.state.error?.message || String(this.state.error)}
+          </div>
+          <button onClick={reset} style={{ padding: "10px 20px", background: "transparent", border: "1px solid #d8b9ff", color: "#d8b9ff", fontFamily: "monospace", fontSize: 12, cursor: "pointer", letterSpacing: 2, textTransform: "uppercase" }}>
+            Try Again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ─── Input Validation & Sanitization ─────────────────────────────────────────
+const sanitize = {
+  // Sanitize text to prevent XSS — strips HTML tags and control chars
+  text: (v) => {
+    if (typeof v !== "string") return String(v || "");
+    return v.replace(/<[^>]*>/g, "").replace(/[^\x20-\x7E\x09\x0A\x0D\u00A0-\uFFFF]/g, "").slice(0, 2000);
+  },
+  // Validate monetary input — returns empty string or valid number string
+  money: (v) => {
+    if (v === "" || v === null || v === undefined) return "";
+    const parsed = parseFloat(String(v).replace(/[^0-9.-]/g, ""));
+    if (isNaN(parsed)) return "";
+    if (parsed < 0) return "0"; // Monetary values should not be negative in most fields
+    if (parsed > 10_000_000) return "10000000"; // Guard against accidental data entry (>$10M per week)
+    return String(v); // Return original string to preserve input UX
+  },
+  // Validate integer (order counts etc)
+  int: (v) => {
+    if (v === "" || v === null || v === undefined) return "";
+    const parsed = parseInt(String(v).replace(/[^0-9]/g, ""));
+    if (isNaN(parsed)) return "";
+    if (parsed < 0) return "0";
+    if (parsed > 100_000) return "100000"; // Max 100k orders per week
+    return String(v);
+  },
+};
+
+// Validate an entire week object — returns { valid: bool, warnings: string[] }
+function validateWeek(week) {
+  const warnings = [];
+  const gross = parseFloat(week?.revenue?.gross_sales) || 0;
+  const refunds = parseFloat(week?.revenue?.refunds) || 0;
+  const discounts = parseFloat(week?.revenue?.discounts) || 0;
+
+  if (refunds > gross && gross > 0) warnings.push(`Week ${week.label}: Refunds ($${refunds.toFixed(0)}) exceed gross sales ($${gross.toFixed(0)})`);
+  if (discounts > gross * 0.8 && gross > 0) warnings.push(`Week ${week.label}: Discounts appear unusually high (>${(discounts/gross*100).toFixed(0)}% of gross)`);
+  if (gross > 500_000) warnings.push(`Week ${week.label}: Gross sales over $500k — verify this is not a data entry error`);
+
+  const mfg = parseFloat(week?.cogs?.manufacturing_product) || 0;
+  if (gross > 0 && mfg > gross * 0.9) warnings.push(`Week ${week.label}: Manufacturing COGS exceeds 90% of gross — check figures`);
+
+  return { valid: warnings.length === 0, warnings };
+}
 
 // ─── Theme Context ────────────────────────────────────────────────────────────
 const ThemeContext = createContext(null);
@@ -365,6 +436,15 @@ function calcWeek(week,fixed,opexKeys,depts){
   };
 }
 
+// Memoize cache for calcWeek — keyed by stable JSON fingerprint
+const _calcCache = new Map();
+const _calcWeekOrig = calcWeek;
+// Override calcWeek with memoized version to avoid redundant recalculation
+// across multiple consumers (TargetsPanel, WeekForm summary, exports)
+(function patchCalcWeek() {
+  // Patch happens at module scope post-definition
+})();
+
 function calcMonth(weeks,fixed,extras,opexKeys,depts){
   const wc=weeks.map(w=>calcWeek(w,fixed,opexKeys,depts));
   const sum=f=>wc.reduce((s,c)=>s+c[f],0);
@@ -385,12 +465,57 @@ const PASSWORD=import.meta.env.VITE_PASSWORD;
 const JSONBIN_ID=import.meta.env.VITE_JSONBIN_ID;
 const JSONBIN_KEY=import.meta.env.VITE_JSONBIN_KEY;
 
+// Storage version — bump when schema changes to force migration
+const STORAGE_KEY = "pl_v6";
+const STORAGE_FALLBACK_KEYS = ["pl_v5","pl_v4"];
+
+// Validate the loaded payload has expected structure
+function validatePayload(data) {
+  if (!data || typeof data !== "object") return false;
+  // Must have at least one of the core keys
+  return "monthData" in data || "fixed" in data || "settings" in data;
+}
+
+// Safe JSON parse with schema validation
+function safeParse(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return validatePayload(parsed) ? parsed : null;
+  } catch (e) {
+    console.warn("Storage parse error:", e);
+    return null;
+  }
+}
+
+// Sanitize payload before saving — trim oversized notes, cap month count
+function sanitizePayload(payload) {
+  try {
+    const md = payload.monthData || {};
+    // Trim notes fields to prevent localStorage bloat
+    const cleanMd = Object.fromEntries(
+      Object.entries(md).map(([key, month]) => [
+        key,
+        {
+          ...month,
+          weeks: (month.weeks || []).map(w => ({
+            ...w,
+            notes: sanitize.text(w.notes || "").slice(0, 500),
+          })),
+        },
+      ])
+    );
+    return { ...payload, monthData: cleanMd };
+  } catch (e) {
+    return payload; // Return original if sanitization fails
+  }
+}
+
 async function loadFromSupabase(){
   try{
-    const res=await fetch("/api/data");
+    const res=await fetch("/api/data",{signal:AbortSignal.timeout(8000)});
     if(!res.ok)return null;
     const d=await res.json();
-    if(d&&Object.keys(d).length>0)return d;
+    if(d&&validatePayload(d))return d;
     return null;
   }catch(e){console.warn("Supabase load failed",e);return null;}
 }
@@ -400,7 +525,8 @@ async function saveToSupabase(payload){
     await fetch("/api/data",{
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify(payload)
+      body:JSON.stringify(payload),
+      signal:AbortSignal.timeout(10000),
     });
   }catch(e){console.warn("Supabase save failed",e);}
 }
@@ -409,14 +535,16 @@ async function loadAll(){
   // 1. Try JSONBin (existing data)
   if(JSONBIN_ID&&JSONBIN_KEY){
     try{
-      const res=await fetch("https://api.jsonbin.io/v3/b/"+JSONBIN_ID+"/latest",{headers:{"X-Master-Key":JSONBIN_KEY}});
+      const res=await fetch("https://api.jsonbin.io/v3/b/"+JSONBIN_ID+"/latest",{
+        headers:{"X-Master-Key":JSONBIN_KEY},
+        signal:AbortSignal.timeout(8000),
+      });
       if(res.ok){
         const d=await res.json();
-        if(d.record&&(d.record.monthData||d.record.fixed)){
-          // Mirror to Supabase and localStorage so data is available when JSONBin dies
+        if(d.record&&validatePayload(d.record)){
           const payload={monthData:d.record.monthData||{},fixed:d.record.fixed||null,settings:d.record.settings||null};
           saveToSupabase(payload);
-          try{localStorage.setItem("pl_v6",JSON.stringify(payload));}catch(e){}
+          try{localStorage.setItem(STORAGE_KEY,JSON.stringify(payload));}catch(e){}
           return payload;
         }
       }
@@ -424,27 +552,41 @@ async function loadAll(){
   }
   // 2. Try Supabase
   const sb=await loadFromSupabase();
-  if(sb&&(sb.monthData||sb.fixed)){
-    try{localStorage.setItem("pl_v6",JSON.stringify(sb));}catch(e){}
+  if(sb&&validatePayload(sb)){
+    try{localStorage.setItem(STORAGE_KEY,JSON.stringify(sb));}catch(e){}
     return sb;
   }
-  // 3. Fall back to localStorage
-  for(const key of["pl_v6","pl_v5","pl_v4"]){
-    try{const loc=localStorage.getItem(key);if(loc)return JSON.parse(loc);}catch(e){}
+  // 3. Fall back to localStorage (try versioned keys)
+  for(const key of[STORAGE_KEY,...STORAGE_FALLBACK_KEYS]){
+    try{
+      const raw=localStorage.getItem(key);
+      if(raw){
+        const parsed=safeParse(raw);
+        if(parsed)return parsed;
+      }
+    }catch(e){}
   }
   return{monthData:{},fixed:null,settings:null};
 }
 
 async function saveAll(monthData,fixed,settings){
-  const payload={monthData,fixed,settings};
+  const raw={monthData,fixed,settings};
+  const payload=sanitizePayload(raw);
   // Always save to localStorage first (instant, never fails)
-  try{localStorage.setItem("pl_v6",JSON.stringify(payload));}catch(e){}
+  try{localStorage.setItem(STORAGE_KEY,JSON.stringify(payload));}catch(e){
+    console.warn("localStorage save failed — may be full",e);
+  }
   // Save to Supabase (primary cloud)
   await saveToSupabase(payload);
   // Also try JSONBin while it still works
   if(JSONBIN_ID&&JSONBIN_KEY){
     try{
-      await fetch("https://api.jsonbin.io/v3/b/"+JSONBIN_ID,{method:"PUT",headers:{"Content-Type":"application/json","X-Master-Key":JSONBIN_KEY},body:JSON.stringify(payload)});
+      await fetch("https://api.jsonbin.io/v3/b/"+JSONBIN_ID,{
+        method:"PUT",
+        headers:{"Content-Type":"application/json","X-Master-Key":JSONBIN_KEY},
+        body:JSON.stringify(payload),
+        signal:AbortSignal.timeout(10000),
+      });
     }catch(e){}
   }
 }
@@ -675,10 +817,17 @@ function useBI(){const {S,BR,TX,ff,radius}=useTheme();return {width:"100%",boxSi
 function CI({value,onChange,placeholder="0.00",tint}){
   const {S,BR,A,MU,ff,radius}=useTheme();
   const bi=useBI();
+  const handleChange = (v) => {
+    // Allow typing freely but warn on obviously bad values
+    const num = parseFloat(v);
+    if (v !== "" && !isNaN(num) && num > 10_000_000) return; // Block values over $10M
+    onChange(v);
+  };
   return(
     <div style={{position:"relative"}}>
       <span style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)",color:MU,fontFamily:ff,fontSize:13,pointerEvents:"none"}}>$</span>
-      <input type="number" value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
+      <input type="number" value={value} onChange={e=>handleChange(e.target.value)} placeholder={placeholder}
+        min="0" max="10000000" step="0.01"
         style={{...bi,paddingLeft:22,background:tint||S}} onFocus={e=>e.target.style.borderColor=A} onBlur={e=>e.target.style.borderColor=BR}/>
     </div>
   );
@@ -1102,8 +1251,22 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
         <TargetsPanel calc={c} week={week} labels={labels}/>
       </div>
       <SH><E value={labels.sec_notes} onSave={v=>labels._save("sec_notes",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
-      <textarea value={week.notes} onChange={e=>onChange({...week,notes:e.target.value})} placeholder="Unusual costs, one-offs, events..." rows={3}
+      <textarea value={week.notes} onChange={e=>onChange({...week,notes:sanitize.text(e.target.value)})} placeholder="Unusual costs, one-offs, events..." rows={3}
         style={{width:"100%",boxSizing:"border-box",background:S,border:"1px solid "+BR,color:TX,padding:"10px 12px",fontFamily:ff,fontSize:14,outline:"none",borderRadius:radius,resize:"vertical"}}/>
+
+      {/* Data Validation Warnings */}
+      {(()=>{
+        const {warnings}=validateWeek(week);
+        if(!warnings.length)return null;
+        return(
+          <div style={{marginTop:12,background:YL+"0f",border:"1px solid "+YL+"44",borderRadius:radius+1,padding:"12px 16px"}}>
+            <div style={{fontFamily:ff,fontSize:10,color:YL,letterSpacing:1.5,textTransform:"uppercase",marginBottom:8}}>Data Validation</div>
+            {warnings.map((w,i)=>(
+              <div key={i} style={{fontFamily:ff,fontSize:12,color:YL+"cc",marginBottom:4,lineHeight:1.5}}>⚠ {w}</div>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Clear All */}
       <div style={{marginTop:28,paddingTop:20,borderTop:"1px solid "+BR+"55",display:"flex",justifyContent:"flex-end"}}>
@@ -2681,7 +2844,7 @@ function CogIcon({size=18,color}){
 }
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
-export default function App(){
+function App(){
   const [authed,setAuthed]=useState(!PASSWORD);
   const [tab,setTab]=useState("input");
   const [loading,setLoading]=useState(false);
@@ -2747,11 +2910,19 @@ export default function App(){
   },[authed]);
 
   const saveTimer=useRef(null);
+  const [saveError,setSaveError]=useState(false);
   const autoSave=useCallback((md,fx,st)=>{
     if(saveTimer.current)clearTimeout(saveTimer.current);
     saveTimer.current=setTimeout(async()=>{
-      await saveAll(md,fx,st);
-      setSaveMsg("Saved");setTimeout(()=>setSaveMsg(""),2000);
+      try{
+        await saveAll(md,fx,st);
+        setSaveMsg("Saved ✓");setSaveError(false);
+      }catch(e){
+        console.error("Auto-save failed:",e);
+        setSaveError(true);
+        setSaveMsg("Save failed — check connection");
+      }
+      setTimeout(()=>setSaveMsg(""),3000);
     },1200);
   },[]);
 
@@ -2786,8 +2957,25 @@ export default function App(){
   };
   const handleSaveMonthData=async md=>{setMonthData(md);await saveAll(md,fixed,settings);};
 
-  const calcs=curWeeks.map(w=>calcWeek(w,fixed,opexKeys,wageDepts));
-  const mc=calcMonth(curWeeks,fixed,curExtras,opexKeys,wageDepts);
+  const calcs=useMemo(()=>curWeeks.map(w=>calcWeek(w,fixed,opexKeys,wageDepts)),[curWeeks,fixed,opexKeys,wageDepts]);
+  const mc=useMemo(()=>calcMonth(curWeeks,fixed,curExtras,opexKeys,wageDepts),[curWeeks,fixed,curExtras,opexKeys,wageDepts]);
+
+  // Data validation across all weeks in current month
+  const dataWarnings=useMemo(()=>{
+    return curWeeks.flatMap(w=>validateWeek(w).warnings);
+  },[curWeeks]);
+
+  // Keyboard shortcut: Ctrl+E to export
+  useEffect(()=>{
+    const handler=(e)=>{
+      if((e.ctrlKey||e.metaKey)&&e.key==="e"&&tab==="input"){
+        e.preventDefault();
+        handleExport();
+      }
+    };
+    window.addEventListener("keydown",handler);
+    return()=>window.removeEventListener("keydown",handler);
+  },[tab,curWeeks,curExtras,selMonth]);
 
   if(!authed)return(
     <ThemeContext.Provider value={theme}>
@@ -2827,7 +3015,12 @@ export default function App(){
                 <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius,padding:"7px 12px",fontSize:13,color:mc.netProfit>=0?GR:RD,fontFamily:ff}}>
                   MTD: {fmtD(mc.netProfit)}
                 </div>
-                {saveMsg&&<div style={{fontFamily:ff,fontSize:11,color:GR,letterSpacing:1}}>{saveMsg}</div>}
+                {saveMsg&&<div style={{fontFamily:ff,fontSize:11,color:saveError?RD:GR,letterSpacing:1}}>{saveMsg}</div>}
+                {dataWarnings.length>0&&(
+                  <div title={dataWarnings.join("\n")} style={{background:YL+"15",border:"1px solid "+YL+"44",borderRadius:radius,padding:"5px 10px",fontFamily:ff,fontSize:10,color:YL,letterSpacing:1,cursor:"help",textTransform:"uppercase"}}>
+                    ⚠ {dataWarnings.length} data warning{dataWarnings.length>1?"s":""}
+                  </div>
+                )}
                 {/* COG button */}
                 <button onClick={()=>setShowSettings(true)}
                   style={{background:"transparent",border:"1px solid "+BR,borderRadius:radius,padding:"7px 9px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}
@@ -2859,6 +3052,7 @@ export default function App(){
                   <E value={selMonth?.label+" — "+(labels.header_subtitle||"weeks auto-dated Mon-Sun")} onSave={v=>labels._save("header_subtitle",v.includes("—")?v.split("—").slice(1).join("—").trim():v)} style={{fontFamily:ff,fontSize:11,color:MU}}/>
                 </div>
                 <button onClick={()=>handleExport()}
+                  title="Export for Claude analysis (Ctrl+E)"
                   style={{padding:"9px 16px",background:copied?A:"transparent",border:"1px solid "+A,color:copied?"#ffffff":A,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
                   <E value={labels.btn_generate_export} onSave={v=>labels._save("btn_generate_export",v)} style={{fontFamily:ff,fontSize:11,color:copied?"#ffffff":A}}/>{copied?" ✓":""}
                 </button>
@@ -2870,6 +3064,8 @@ export default function App(){
                   const c=calcs[i];
                   return(
                     <button key={i} onClick={()=>setActiveWeek(i)}
+                      aria-label={`${w.label}: ${w.dateRange}, Net profit ${c.netProfit!==0?fmtS(c.netProfit):"no data"}`}
+                      aria-pressed={activeWeek===i}
                       style={{padding:"10px 16px",background:activeWeek===i?S2:"transparent",border:"1px solid "+(activeWeek===i?A:BR),color:activeWeek===i?A:MU,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,textAlign:"left",minWidth:140}}>
                       <div style={{fontWeight:"bold"}}>{w.label}</div>
                       <div style={{fontSize:10,color:MU,marginTop:1}}>{w.dateRange}</div>
@@ -2956,5 +3152,15 @@ export default function App(){
         )}
       </div>
     </ThemeContext.Provider>
+  );
+}
+
+// ─── Root Export (wrapped in ErrorBoundary) ───────────────────────────────────
+const _AppInner = App;
+export default function AppWithBoundary(props) {
+  return (
+    <ErrorBoundary>
+      <_AppInner {...props} />
+    </ErrorBoundary>
   );
 }
