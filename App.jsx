@@ -180,6 +180,11 @@ const DEFAULT_WAGE_DEPTS = [
   ]},
   {key:"marketing",label:"Marketing",subs:[{key:"marketing_dept",label:"Marketing"}]},
   {key:"hr",label:"HR & General Management",subs:[{key:"hr_management",label:"HR & General Management"}]},
+  {key:"super",label:"Superannuation",subs:[
+    {key:"super_ops",label:"Operations"},
+    {key:"super_marketing",label:"Marketing"},
+    {key:"super_hr",label:"HR & Management"},
+  ]},
 ];
 
 const DEFAULT_STAFF = [
