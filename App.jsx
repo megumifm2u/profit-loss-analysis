@@ -198,14 +198,19 @@ const allWageKeys = depts => (depts||DEFAULT_WAGE_DEPTS).flatMap(d=>d.subs.map(s
 // ─── Month / Week helpers ─────────────────────────────────────────────────────
 function getMonthWeeks(year,month){
   const first=new Date(year,month,1);
+  const lastDay=new Date(year,month+1,0); // last day of month
   const dow=first.getDay(), daysBack=dow===0?6:dow-1;
   const mon0=new Date(first); mon0.setDate(first.getDate()-daysBack);
   const fmt=d=>String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+String(d.getFullYear()).slice(-2);
-  return Array.from({length:4},(_,w)=>{
+  const weeks=[];
+  for(let w=0;;w++){
     const mon=new Date(mon0); mon.setDate(mon0.getDate()+w*7);
     const sun=new Date(mon); sun.setDate(mon.getDate()+6);
-    return {weekNum:w+1,label:"Week "+(w+1),dateRange:fmt(mon)+" - "+fmt(sun)};
-  });
+    weeks.push({weekNum:w+1,label:"Week "+(w+1),dateRange:fmt(mon)+" - "+fmt(sun)});
+    // stop once this week's Monday is past the last day of the month
+    if(sun>=lastDay)break;
+  }
+  return weeks;
 }
 function monthKey(y,m){return y+"-"+String(m).padStart(2,"0");}
 function monthLabel(y,m){return new Date(y,m,1).toLocaleString("default",{month:"long",year:"numeric"});}
@@ -1755,7 +1760,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
 }
 
 // ─── Monthly Overview ─────────────────────────────────────────────────────────
-function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opexKeys,depts,labels,monthKey}){
+function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opexKeys,depts,labels,monthKey,allMonthData}){
   const {S,S2,BR,A,MU,TX,ff,RD,GR,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
@@ -1770,30 +1775,42 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
   // Parse dd/mm/yy date string to Date object
   const parseWkDate=s=>{if(!s)return null;const[d,m,y]=s.split("/");return new Date(2000+parseInt(y),parseInt(m)-1,parseInt(d));};
 
-  // Pro-rate weeks based on date range overlap
+  // Collect all weeks across ALL saved months, sorted chronologically
+  const getAllWeeks=()=>{
+    if(!allMonthData)return weeks;
+    const allKeys=Object.keys(allMonthData).sort();
+    const out=[];
+    allKeys.forEach(k=>{const md=allMonthData[k];if(md?.weeks)md.weeks.forEach(w=>out.push(w));});
+    const seen=new Set();
+    return out.filter(w=>{if(seen.has(w.dateRange))return false;seen.add(w.dateRange);return true;});
+  };
+
+  // Pro-rate weeks based on date range overlap -- searches ALL months when range active
+  const calcFactor=(w,from,to)=>{
+    const wStart=parseWkDate(w.dateRange.split(" - ")[0]);
+    const wEnd=parseWkDate(w.dateRange.split(" - ")[1]);
+    if(!wStart||!wEnd)return 0;
+    wEnd.setHours(23,59,59);
+    if(wEnd<from||wStart>to)return 0;
+    if(wStart>=from&&wEnd<=to)return 1;
+    const overlapStart=wStart<from?from:wStart;
+    const overlapEnd=wEnd>to?to:wEnd;
+    const overlapDays=(overlapEnd-overlapStart)/(1000*60*60*24)+1;
+    return Math.min(1,Math.max(0,overlapDays/7));
+  };
+
   const getProRatedWeeks=()=>{
     if(!useRange||!rangeFrom||!rangeTo)return{weeks,factors:weeks.map(()=>1)};
     const from=new Date(rangeFrom),to=new Date(rangeTo);
     to.setHours(23,59,59);
-    const factors=weeks.map(w=>{
-      const wStart=parseWkDate(w.dateRange.split(" - ")[0]);
-      const wEnd=parseWkDate(w.dateRange.split(" - ")[1]);
-      if(!wStart||!wEnd)return 1;
-      wEnd.setHours(23,59,59);
-      // No overlap
-      if(wEnd<from||wStart>to)return 0;
-      // Full overlap
-      if(wStart>=from&&wEnd<=to)return 1;
-      // Partial overlap — count overlapping days / 7
-      const overlapStart=wStart<from?from:wStart;
-      const overlapEnd=wEnd>to?to:wEnd;
-      const overlapDays=(overlapEnd-overlapStart)/(1000*60*60*24)+1;
-      return Math.min(1,Math.max(0,overlapDays/7));
-    });
-    return{weeks,factors};
+    const sourceWeeks=getAllWeeks();
+    const rangeWeeks=sourceWeeks.filter(w=>calcFactor(w,from,to)>0);
+    const rangeFactors=rangeWeeks.map(w=>calcFactor(w,from,to));
+    return{weeks:rangeWeeks,factors:rangeFactors};
   };
 
   const {weeks:rWeeks,factors}=getProRatedWeeks();
+  const activeWeeks=useRange&&rangeFrom&&rangeTo?rWeeks:weeks;
 
   // Build pro-rated week calcs
   const proRatedCalc=(wc,factor)=>({
@@ -1814,7 +1831,11 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
     },
   });
 
-  const rCalcs=mc.weekCalcs.map((wc,i)=>proRatedCalc(wc,factors[i]));
+  // When range spans multiple months, recalculate from activeWeeks
+  const activeMc=useRange&&rangeFrom&&rangeTo
+    ?calcMonth(activeWeeks,fixed,extras,keys,wDepts)
+    :mc;
+  const rCalcs=activeMc.weekCalcs.map((wc,i)=>proRatedCalc(wc,factors[i]));
   const rSum=f=>rCalcs.reduce((s,c)=>s+(c[f]||0),0);
   const rNetRev=rSum("netRevenue"),rGrossProfit=rSum("grossProfit"),rTotalCOGS=rSum("totalCOGS");
   const rTotalExpenses=rSum("totalExpenses"),rNetProfit=rSum("netProfit");
@@ -1840,7 +1861,7 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
     t+="### Discount Reclassification\n";
     t+="Service Recovery: "+fmt(totalDR.serviceRecoveryCOGS)+" | Marketing: "+fmt(totalDR.marketingDisc)+" | Staff: "+fmt(totalDR.staffDisc)+" | True Promo: "+fmt(totalDR.promoDisc)+"\n\n";
     t+="### Week Breakdown\n";
-    weeks.forEach((w,i)=>{const c=rCalcs[i];const f=factors[i];if(f===0)return;t+="**"+w.label+(f<1?" ("+Math.round(f*7)+"d pro-rated)":"")+"** ("+w.dateRange+") - Rev: "+fmt(c.netRevenue)+" | GP: "+c.grossMargin.toFixed(1)+"% | Net: "+fmt(c.netProfit)+" ("+c.netMargin.toFixed(1)+"%)\n";});
+    activeWeeks.forEach((w,i)=>{const c=rCalcs[i];const f=factors[i];if(f===0)return;t+="**"+w.label+(f<1?" ("+Math.round(f*7)+"d pro-rated)":"")+"** ("+w.dateRange+") - Rev: "+fmt(c.netRevenue)+" | GP: "+c.grossMargin.toFixed(1)+"% | Net: "+fmt(c.netProfit)+" ("+c.netMargin.toFixed(1)+"%)\n";});
     navigator.clipboard.writeText(t);setSumCopied(true);setTimeout(()=>setSumCopied(false),3000);
   };
 
@@ -1866,7 +1887,7 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
             <div><div style={{fontFamily:ff,fontSize:9,color:MU,marginBottom:4,textTransform:"uppercase",letterSpacing:0.7}}>To</div>
               <input type="date" value={rangeTo} onChange={e=>{setRangeTo(e.target.value);setUseRange(true);}} style={{background:S,border:"1px solid "+BR,color:TX,padding:"6px 10px",fontFamily:ff,fontSize:12,outline:"none",borderRadius:radius}}/></div>
             {useRange&&<button onClick={()=>{setUseRange(false);setRangeFrom("");setRangeTo("");}} style={{padding:"6px 12px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:10,cursor:"pointer",borderRadius:radius,alignSelf:"flex-end"}}>Clear</button>}
-            {useRange&&<div style={{fontFamily:ff,fontSize:10,color:A,alignSelf:"center"}}>{factors.filter(f=>f>0&&f<1).length} weeks pro-rated · {factors.filter(f=>f===0).length} excluded</div>}
+            {useRange&&<div style={{fontFamily:ff,fontSize:10,color:A,alignSelf:"center"}}>{factors.filter(f=>f>0&&f<1).length} weeks pro-rated · {factors.filter(f=>f===0).length} excluded</div>} {useRange&&rangeFrom&&rangeTo&&<div style={{fontFamily:ff,fontSize:10,color:MU,alignSelf:"center",marginLeft:4}}>· all months</div>}
           </div>
           {!useRange&&monthDateRange&&<div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:16,marginTop:-8}}>{monthDateRange}</div>}
           <Row>
@@ -1910,7 +1931,7 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
                 ))}
               </tr></thead>
               <tbody>
-                {weeks.map((w,i)=>{const c=rCalcs[i];const f=factors[i];if(f===0)return null;return(
+                {activeWeeks.map((w,i)=>{const c=rCalcs[i];const f=factors[i];if(f===0)return null;return(
                   <tr key={i} style={{borderBottom:"1px solid "+BR+"22",opacity:f<1?0.7:1}}>
                     <td style={{padding:"10px",color:TX}}>{w.label}{f<1&&f>0?<span style={{fontFamily:ff,fontSize:9,color:MU,marginLeft:4}}>({Math.round(f*7)}d)</span>:null}</td>
                     <td style={{padding:"10px",color:MU,fontSize:11,whiteSpace:"nowrap"}}>{w.dateRange}</td>
@@ -1955,7 +1976,7 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
           ))}
 
           <div style={{display:"flex",gap:10,marginTop:24}}>
-            <button onClick={()=>onExport(weeks,extras,rangeLabel,factors)}
+            <button onClick={()=>onExport(activeWeeks,extras,rangeLabel,factors)}
               style={{flex:1,padding:"13px 0",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
               <div><E value={labels.btn_monthly_export} onSave={v=>labels._save("btn_monthly_export",v)} style={{color:A,fontFamily:ff,fontSize:12}}/>{copied?" - Copied!":""}</div>
               <div style={{fontSize:9,color:MU,marginTop:2}}><E value={labels.btn_monthly_export_sub} onSave={v=>labels._save("btn_monthly_export_sub",v)} style={{color:MU,fontFamily:ff,fontSize:9}}/></div>
@@ -2877,7 +2898,7 @@ export default function App(){
 
           {tab==="overview"&&!loading&&(
             <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+4,padding:"24px 28px"}}>
-              <MonthlyOverview weeks={curWeeks} fixed={fixed} extras={curExtras} onExtrasChange={updateExtras} onExport={(w,e,rl,f)=>handleExport(w,e,rl||selMonth?.label,f)} copied={copied} opexKeys={opexKeys} depts={wageDepts} labels={labels} monthKey={curKey}/>
+              <MonthlyOverview weeks={curWeeks} fixed={fixed} extras={curExtras} onExtrasChange={updateExtras} onExport={(w,e,rl,f)=>handleExport(w,e,rl||selMonth?.label,f)} copied={copied} opexKeys={opexKeys} depts={wageDepts} labels={labels} monthKey={curKey} allMonthData={monthData}/>
             </div>
           )}
 
