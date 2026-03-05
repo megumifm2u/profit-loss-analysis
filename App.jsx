@@ -137,7 +137,7 @@ const DEFAULT_TARGETS = {
 const DEFAULT_LABELS = {
   header_brand:"Finance Operations", header_title:"P&L Dashboard", header_subtitle:"weeks auto-dated Mon-Sun",
   tab_input:"WEEKLY INPUT", tab_overview:"MONTHLY OVERVIEW", tab_visualise:"VISUALISE",
-  tab_compare:"COMPARE", tab_fixed:"FIXED COSTS", tab_targets:"TARGETS", tab_reports:"REPORTS",
+  tab_compare:"COMPARE", tab_fixed:"FIXED COSTS", tab_margin:"MARGIN ANALYSIS", tab_targets:"TARGETS", tab_reports:"REPORTS",
   sec_shopify:"Shopify Data Import", sec_shopify_btn:"AUTOFILL FROM DATA",
   sec_revenue:"Revenue and Deductions", sec_cogs:"COGS - Cost of Goods",
   sec_satchel:"Satchel Packaging - Auto-calculated by Order Count",
@@ -702,8 +702,54 @@ function parseShopify(raw){
   return{revenue:clean(revenue),cogs:clean(cogs),opex:clean(opex)};
 }
 
+// ─── Product Margin Parser ────────────────────────────────────────────────────
+function parseProductMargin(raw){
+  if(!raw?.trim())return[];
+  const pn=s=>{
+    if(!s)return 0;
+    const clean=s.toString().trim().replace(/[$,]/g,"").replace(/%/g,"");
+    return parseFloat(clean)||0;
+  };
+  const rows=[];
+  for(const line of raw.split("\n")){
+    const parts=line.split("\t");
+    if(parts.length<8)continue;
+    // Skip header lines
+    if(/product|variant|units sold/i.test(parts[0]))continue;
+    // Need at least product name and some numeric data
+    const units=pn(parts[2]);
+    const gross=pn(parts[3]);
+    if(!parts[0].trim()||(!units&&!gross))continue;
+    const product=parts[0].trim();
+    const variant=parts[1]?.trim()||"";
+    const discounts=Math.abs(pn(parts[4]));
+    const returns=Math.abs(pn(parts[5]));
+    const netSales=pn(parts[6]);
+    const cogsUnit=pn(parts[7]);
+    const totalCogs=pn(parts[8])||cogsUnit*units;
+    const grossProfit=pn(parts[9])||netSales-totalCogs;
+    const marginPct=netSales>0?(grossProfit/netSales)*100:0;
+    const discRate=gross>0?(discounts/gross)*100:0;
+    rows.push({product,variant,units,gross,discounts,returns,netSales,cogsUnit,totalCogs,grossProfit,marginPct,discRate});
+  }
+  // Aggregate by product
+  const map={};
+  rows.forEach(r=>{
+    if(!map[r.product])map[r.product]={product:r.product,units:0,gross:0,discounts:0,returns:0,netSales:0,totalCogs:0,grossProfit:0,variants:[]};
+    const p=map[r.product];
+    p.units+=r.units; p.gross+=r.gross; p.discounts+=r.discounts;
+    p.returns+=r.returns; p.netSales+=r.netSales; p.totalCogs+=r.totalCogs;
+    p.grossProfit+=r.grossProfit; p.variants.push(r);
+  });
+  return Object.values(map).map(p=>({
+    ...p,
+    marginPct:p.netSales>0?(p.grossProfit/p.netSales)*100:0,
+    discRate:p.gross>0?(p.discounts/p.gross)*100:0,
+  })).sort((a,b)=>b.netSales-a.netSales);
+}
+
 // ─── Export ───────────────────────────────────────────────────────────────────
-function generateExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,labels,factors){
+function generateExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,labels,factors,productMarginData){
   const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
   const pct=(v,b)=>b>0?((v/b)*100).toFixed(1)+"%":"0.0%";
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
@@ -776,6 +822,29 @@ function generateExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,labels,fa
     const total=staff.reduce((s,m)=>s+n(m.hourlyRate)*n(m.hoursPerWeek),0);
     o+="  Budgeted: "+fmt(total)+" | Actual: "+fmt(mc.totalWages)+" | Variance: "+fmt(mc.totalWages-total)+"\n\n";
   }
+  // Product margin section — use month-level data passed in directly
+  const productList=(productMarginData||[]).slice().sort((a,b)=>b.netSales-a.netSales);
+  if(productList.length>0){
+    const gmTarget=weeks[0]?.weekTargets?.gross_margin_target||55;
+    o+="--- PRODUCT MARGIN ANALYSIS ---\n";
+    productList.forEach(p=>{
+      const m=p.netSales>0?(p.grossProfit/p.netSales)*100:0;
+      const dr=p.gross>0?(p.discounts/p.gross)*100:0;
+      const flag=p.netSales<=0&&p.gross>0?"[GIFTED/ZEROED]":m<gmTarget?"[BELOW TARGET "+gmTarget+"%]":"";
+      o+="  "+p.product+": "+Math.round(p.units)+"u | Gross "+fmt(p.gross)+" | Disc "+dr.toFixed(1)+"% | Net "+fmt(p.netSales)+" | COGS "+fmt(p.totalCogs)+" | GP "+fmt(p.grossProfit)+" | Margin "+m.toFixed(1)+"%"+(flag?" "+flag:"")+"\n";
+    });
+    const totalPNet=productList.reduce((s,p)=>s+p.netSales,0);
+    const totalPGP=productList.reduce((s,p)=>s+p.grossProfit,0);
+    const blended=totalPNet>0?(totalPGP/totalPNet)*100:0;
+    const belowTarget=productList.filter(p=>p.netSales>0&&(p.grossProfit/p.netSales)*100<gmTarget);
+    const gifted=productList.filter(p=>p.netSales<=0&&p.gross>0);
+    o+="  Blended product gross margin: "+blended.toFixed(1)+"% | Target: "+gmTarget+"%\n";
+    o+="  Products below target: "+belowTarget.map(p=>p.product).join(", ")+(belowTarget.length?"\n":"")+"\n";
+    if(gifted.length)o+="  Fully gifted/zeroed (100% discounted): "+gifted.map(p=>p.product+"("+fmt(p.gross)+")").join(", ")+"\n";
+    o+="\n";
+  }
+
+
   o+="=== END DATA ===\n\nYou are the COO's senior financial advisor. Produce a comprehensive P&L analysis in full paragraphs (NOT dot points).\n\n";
   o+="1. PROFITABILITY VERDICT - Net margin vs benchmarks (10-15% net, 40-65% gross). Growth/maintenance/risk posture.\n\n";
   o+="2. DISCOUNT RECLASSIFICATION IMPACT - The total discounts figure includes service recovery (ops cost), influencer gifting (marketing), and staff benefits. Explain how reclassifying these changes the true picture of both revenue quality and operational efficiency. What is the real promotional discount rate? What is the service recovery rate and what does it signal about product quality?\n\n";
@@ -788,7 +857,8 @@ function generateExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,labels,fa
   o+="9. COLLAB AND INFLUENCER ROI - Total spend including gifting. Minimum ROAS thresholds.\n\n";
   o+="10. WAGES BY DEPARTMENT - Wages as % of net revenue. Efficiency and sustainability.\n\n";
   o+="11. OPEX LINE BY LINE - Justify, benchmark, renegotiate. Model 20% revenue decline.\n\n";
-  o+="12. TOP 5 ACTIONS - Exact dollar improvement, mechanism, timeline, trade-off.\n\n";
+  o+="12. PRODUCT MARGIN ANALYSIS - If product data is provided: rank products by contribution margin. Which products are pulling the blended margin down? Which are fully gifted/zeroed and what is the total unrecovered COGS? Which discount codes are pushing products below target margin? Recommend pricing or discount adjustments.\n\n";
+  o+="13. TOP 5 ACTIONS - Exact dollar improvement, mechanism, timeline, trade-off.\n\n";
   o+="13. MARGIN EXPANSION - Structural changes over 90 days.\n\n";
   o+="14. NEXT MONTH TARGETS - Exact dollar targets. Break-even calculation.\n\n";
   o+="15. NEXT WEEK STAFFING PLAN - Based on roster vs actual wages variance, recommend exact hours per person for next week to hit a 15% net margin at current revenue run rate.\n\nUse exact figures. Flag anomalies. Make it worth reading.";
@@ -1007,6 +1077,166 @@ function ShopifyImport({week,onChange,labels}){
   );
 }
 
+// ─── Product Margin Import ────────────────────────────────────────────────────
+function ProductMarginImport({products,onUpdate,targetMargin,fullPage}){
+  const {S2,BR,A,S,TX,ff,MU,GR,RD,radius}=useTheme();
+  const [raw,setRaw]=useState("");
+  const [msg,setMsg]=useState("");
+  const [open,setOpen]=useState(!!fullPage);
+  const [showPaste,setShowPaste]=useState(!products?.length);
+  const [expandedProduct,setExpandedProduct]=useState(null);
+  const target=targetMargin||55;
+  const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  function apply(){
+    const parsed=parseProductMargin(raw);
+    if(!parsed.length){setMsg("No data detected");return;}
+    // Merge with existing — update matching products, add new ones
+    const existing={};
+    (products||[]).forEach(p=>{existing[p.product]=p;});
+    parsed.forEach(p=>{existing[p.product]=p;});
+    onUpdate(Object.values(existing));
+    setMsg("Saved "+parsed.length+" products");
+    setRaw("");
+    setShowPaste(false);
+    setTimeout(()=>setMsg(""),3000);
+  }
+
+  const list=products||[];
+  const totalNet=list.reduce((s,p)=>s+p.netSales,0);
+  const totalGP=list.reduce((s,p)=>s+p.grossProfit,0);
+  const blended=totalNet>0?(totalGP/totalNet)*100:0;
+  const flags=list.filter(p=>p.netSales>0&&p.marginPct<target);
+  const zeroed=list.filter(p=>p.netSales<=0&&p.gross>0);
+
+  const statusColor=p=>{
+    if(p.netSales<=0&&p.gross>0)return RD;
+    if(p.marginPct<target)return "#f59e0b";
+    return GR;
+  };
+  const statusLabel=p=>{
+    if(p.netSales<=0&&p.gross>0)return"GIFTED";
+    if(p.marginPct<target)return"LOW";
+    return"OK";
+  };
+
+  return(
+    <div style={{marginBottom:16}}>
+      {/* Header toggle */}
+      <div onClick={()=>!fullPage&&setOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 14px",background:S2,border:"1px solid "+(open?A:BR),borderRadius:open?"6px 6px 0 0":"6px",cursor:fullPage?"default":"pointer",userSelect:"none"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontFamily:ff,fontSize:10,color:open?A:MU,letterSpacing:2,textTransform:"uppercase"}}>Product Margin</span>
+          {list.length>0&&!open&&(
+            <span style={{fontFamily:ff,fontSize:10,color:MU}}>
+              {list.length} products · {blended.toFixed(1)}% blended
+              {(flags.length+zeroed.length)>0&&<span style={{color:RD,marginLeft:6}}>· {flags.length+zeroed.length} flagged</span>}
+            </span>
+          )}
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          {list.length>0&&<span style={{fontFamily:ff,fontSize:9,color:blended>=target?GR:RD,fontWeight:"bold"}}>{blended.toFixed(1)}%</span>}
+          {!fullPage&&<span style={{fontFamily:ff,fontSize:10,color:MU}}>{open?"▲":"▼"}</span>}
+        </div>
+      </div>
+
+      {open&&(
+        <div style={{border:"1px solid "+BR,borderTop:"none",borderRadius:"0 0 6px 6px",background:S2}}>
+          {/* Summary bar */}
+          {list.length>0&&(
+            <div style={{display:"flex",gap:0,borderBottom:"1px solid "+BR+"44"}}>
+              {[
+                ["Blended GM",blended.toFixed(1)+"%",blended>=target?GR:RD],
+                ["Net Sales",fmt(totalNet),A],
+                ["Gross Profit",fmt(totalGP),totalGP>=0?GR:RD],
+                ["Flagged",(flags.length+zeroed.length).toString(),(flags.length+zeroed.length)>0?RD:GR],
+              ].map(([lbl,val,col],i)=>(
+                <div key={i} style={{flex:1,padding:"8px 12px",borderRight:i<3?"1px solid "+BR+"44":"none"}}>
+                  <div style={{fontFamily:ff,fontSize:8,color:MU,textTransform:"uppercase",letterSpacing:0.7}}>{lbl}</div>
+                  <div style={{fontFamily:ff,fontSize:13,color:col,fontWeight:"bold",marginTop:2}}>{val}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Product rows */}
+          {list.length>0&&(
+            <div style={{maxHeight:320,overflowY:"auto"}}>
+              {list.map((p,i)=>{
+                const isExp=expandedProduct===p.product;
+                const sc=statusColor(p);
+                return(
+                  <div key={i} style={{borderBottom:"1px solid "+BR+"33"}}>
+                    <div onClick={()=>setExpandedProduct(isExp?null:p.product)}
+                      style={{display:"flex",alignItems:"center",gap:8,padding:"7px 14px",cursor:p.variants?.length>1?"pointer":"default",background:isExp?A+"11":"transparent"}}>
+                      <span style={{fontFamily:ff,fontSize:9,color:sc,fontWeight:"bold",minWidth:36,letterSpacing:0.5}}>{statusLabel(p)}</span>
+                      <span style={{fontFamily:ff,fontSize:11,color:TX,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.product}</span>
+                      <span style={{fontFamily:ff,fontSize:10,color:MU,minWidth:28,textAlign:"right"}}>{p.units}u</span>
+                      <span style={{fontFamily:ff,fontSize:10,color:p.discRate>20?RD:MU,minWidth:40,textAlign:"right"}}>{p.discRate.toFixed(1)}%</span>
+                      <span style={{fontFamily:ff,fontSize:10,color:A,minWidth:64,textAlign:"right"}}>{fmt(p.netSales)}</span>
+                      <span style={{fontFamily:ff,fontSize:11,color:sc,fontWeight:"bold",minWidth:44,textAlign:"right"}}>{p.marginPct.toFixed(1)}%</span>
+                      {p.variants?.length>1&&<span style={{fontFamily:ff,fontSize:9,color:MU}}>{isExp?"▲":"▼"}</span>}
+                    </div>
+                    {isExp&&p.variants?.length>1&&(
+                      <div style={{background:S,padding:"6px 14px 8px 50px"}}>
+                        <div style={{display:"flex",gap:6,fontFamily:ff,fontSize:8,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:4,paddingBottom:3,borderBottom:"1px solid "+BR+"33"}}>
+                          <span style={{minWidth:40}}>Variant</span><span style={{minWidth:28}}>Units</span><span style={{minWidth:40}}>Disc%</span><span style={{minWidth:64}}>Net</span><span style={{minWidth:44}}>Margin</span>
+                        </div>
+                        {p.variants.map((v,j)=>(
+                          <div key={j} style={{display:"flex",gap:6,fontFamily:ff,fontSize:10,color:MU,padding:"3px 0"}}>
+                            <span style={{minWidth:40,color:TX}}>{v.variant}</span>
+                            <span style={{minWidth:28}}>{v.units}u</span>
+                            <span style={{minWidth:40,color:v.discRate>20?RD:MU}}>{v.discRate.toFixed(1)}%</span>
+                            <span style={{minWidth:64,color:A}}>{fmt(v.netSales)}</span>
+                            <span style={{minWidth:44,color:v.marginPct<target?RD:GR,fontWeight:"bold"}}>{v.marginPct.toFixed(1)}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Actions row */}
+          <div style={{padding:"10px 14px",display:"flex",alignItems:"center",gap:10,borderTop:list.length?"1px solid "+BR+"44":"none",flexWrap:"wrap"}}>
+            <button onClick={()=>setShowPaste(s=>!s)}
+              style={{padding:"6px 14px",background:showPaste?A:"transparent",border:"1px solid "+(showPaste?A:BR),color:showPaste?"#fff":MU,fontFamily:ff,fontSize:10,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
+              {list.length>0?"Update Data":"+ Add Data"}
+            </button>
+            {list.length>0&&<button onClick={()=>{if(window.confirm("Clear all product margin data?"))onUpdate([]);}}
+              style={{padding:"6px 14px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:10,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
+              Clear
+            </button>}
+            {msg&&<span style={{fontFamily:ff,fontSize:11,color:GR}}>{msg}</span>}
+          </div>
+
+          {/* Paste area — shown only when editing */}
+          {showPaste&&(
+            <div style={{padding:"0 14px 14px"}}>
+              <div style={{fontFamily:ff,fontSize:9,color:MU,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>
+                Paste Shopify AI product margin table — new data merges with existing
+              </div>
+              <textarea value={raw} onChange={e=>setRaw(e.target.value)}
+                placeholder={"Product	Variant	Units Sold	Gross Sales	Discounts	Returns	Net Sales	COGS/Unit	Total COGS	Gross Profit	Margin %"}
+                rows={5}
+                style={{width:"100%",boxSizing:"border-box",background:S,border:"1px solid "+BR,color:TX,padding:"10px 12px",fontFamily:"monospace",fontSize:11,outline:"none",borderRadius:radius,resize:"vertical"}}/>
+              <div style={{display:"flex",gap:10,marginTop:8}}>
+                <button onClick={apply} style={{padding:"7px 16px",background:A,border:"none",color:"#fff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
+                  SAVE
+                </button>
+                <button onClick={()=>{setShowPaste(false);setRaw("");}}
+                  style={{padding:"7px 14px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 // ─── Confirm Modal ────────────────────────────────────────────────────────────
 function ConfirmModal({message,onConfirm,onCancel}){
   const {BG,S2,BR,A,RD,MU,TX,ff,radius}=useTheme();
@@ -1923,7 +2153,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
 }
 
 // ─── Monthly Overview ─────────────────────────────────────────────────────────
-function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opexKeys,depts,labels,monthKey,allMonthData}){
+function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opexKeys,depts,labels,monthKey,allMonthData,productMarginData,onProductMarginUpdate}){
   const {S,S2,BR,A,MU,TX,ff,RD,GR,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
@@ -2558,6 +2788,39 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts}){
 }
 
 // ─── Targets Page ─────────────────────────────────────────────────────────────
+// ─── Margin Analysis Page ─────────────────────────────────────────────────────
+function MarginAnalysisPage({productMarginData,onProductMarginUpdate,targetMargin}){
+  const {S2,BR,A,MU,TX,ff,GR,RD,radius}=useTheme();
+  const list=productMarginData||[];
+  const target=targetMargin||55;
+  const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const totalNet=list.reduce((s,p)=>s+p.netSales,0);
+  const totalGP=list.reduce((s,p)=>s+p.grossProfit,0);
+  const blended=totalNet>0?(totalGP/totalNet)*100:0;
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:12}}>
+        <div>
+          <div style={{fontFamily:ff,fontSize:10,letterSpacing:2,color:A,textTransform:"uppercase",marginBottom:4}}>Margin Analysis</div>
+          {list.length>0&&(
+            <div style={{fontFamily:ff,fontSize:12,color:MU}}>
+              {list.length} products · blended margin <span style={{color:blended>=target?GR:RD,fontWeight:"bold"}}>{blended.toFixed(1)}%</span>
+              {" "}· target {target}%
+              {" "}· {list.filter(p=>p.netSales>0&&p.marginPct<target).length+list.filter(p=>p.netSales<=0&&p.gross>0).length} flagged
+            </div>
+          )}
+        </div>
+      </div>
+      <ProductMarginImport
+        products={list}
+        onUpdate={onProductMarginUpdate}
+        targetMargin={target}
+        fullPage
+      />
+    </div>
+  );
+}
+
 function TargetsPage({weeks,curWeeks,onUpdateWeeks,activeWeek,labels,monthData,selMonthKey}){
   const {S,S2,BR,A,MU,TX,GR,RD,YL,BG,ff,radius}=useTheme();
 
@@ -2942,6 +3205,10 @@ function App(){
     const updated={...monthData,[curKey]:{...curEntry,weeks:curWeeks,extras:ne,label:selMonth.label,lastSaved:new Date().toLocaleString("en-AU")}};
     setMonthData(updated);autoSave(updated,fixed,settings);
   };
+  const updateProductMargin=pm=>{
+    const updated={...monthData,[curKey]:{...curEntry,weeks:curWeeks,extras:curExtras,productMarginData:pm,label:selMonth.label,lastSaved:new Date().toLocaleString("en-AU")}};
+    setMonthData(updated);autoSave(updated,fixed,settings);
+  };
   const updateFixed=async nf=>{setFixed(nf);await saveAll(monthData,nf,settings);setSaveMsg("Saved");setTimeout(()=>setSaveMsg(""),2000);};
   const updateSettings=ns=>{setSettings(ns);autoSave(monthData,fixed,ns);};
   const updateTheme=nt=>{
@@ -2952,7 +3219,8 @@ function App(){
   };
 
   const handleExport=(weeksData=curWeeks,extras=curExtras,label=selMonth?.label,factors=null)=>{
-    navigator.clipboard.writeText(generateExport(weeksData,fixed,extras,label,opexKeys,wageDepts,staff,labels,factors));
+    const pm=curEntry?.productMarginData||[];
+    navigator.clipboard.writeText(generateExport(weeksData,fixed,extras,label,opexKeys,wageDepts,staff,labels,factors,pm));
     setCopied(true);setTimeout(()=>setCopied(false),3000);
   };
   const handleSaveMonthData=async md=>{setMonthData(md);await saveAll(md,fixed,settings);};
@@ -2988,6 +3256,7 @@ function App(){
   const TABS=[
     {id:"input",key:"tab_input"},{id:"overview",key:"tab_overview"},{id:"visualise",key:"tab_visualise"},
     {id:"compare",key:"tab_compare"},{id:"fixed",key:"tab_fixed"},
+    {id:"margin",key:"tab_margin"},
     {id:"targets",key:"tab_targets"},
     {id:"reports",key:"tab_reports",suffix:" ("+Object.keys(monthData).length+")"},
   ];
@@ -3094,7 +3363,7 @@ function App(){
 
           {tab==="overview"&&!loading&&(
             <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+4,padding:"24px 28px"}}>
-              <MonthlyOverview weeks={curWeeks} fixed={fixed} extras={curExtras} onExtrasChange={updateExtras} onExport={(w,e,rl,f)=>handleExport(w,e,rl||selMonth?.label,f)} copied={copied} opexKeys={opexKeys} depts={wageDepts} labels={labels} monthKey={curKey} allMonthData={monthData}/>
+              <MonthlyOverview weeks={curWeeks} fixed={fixed} extras={curExtras} onExtrasChange={updateExtras} onExport={(w,e,rl,f)=>handleExport(w,e,rl||selMonth?.label,f)} copied={copied} opexKeys={opexKeys} depts={wageDepts} labels={labels} monthKey={curKey} allMonthData={monthData} productMarginData={curEntry?.productMarginData||[]} onProductMarginUpdate={updateProductMargin}/>
             </div>
           )}
 
@@ -3113,6 +3382,16 @@ function App(){
           {tab==="fixed"&&!loading&&(
             <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+4,padding:"24px 28px"}}>
               {fixed&&<FixedCostsPage fixed={fixed} onChange={updateFixed} opexKeys={opexKeys} settings={settings} onSettingsChange={updateSettings} labels={labels}/>}
+            </div>
+          )}
+
+          {tab==="margin"&&!loading&&(
+            <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+4,padding:"24px 28px"}}>
+              <MarginAnalysisPage
+                productMarginData={curEntry?.productMarginData||[]}
+                onProductMarginUpdate={updateProductMargin}
+                targetMargin={curWeeks[0]?.weekTargets?.gross_margin_target||55}
+              />
             </div>
           )}
 
