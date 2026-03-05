@@ -1437,7 +1437,7 @@ function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,label
     </div>
   );
 
-  const Part=({title,subtitle,part,accentColor})=>(
+  const renderPart=(title,subtitle,part,accentColor)=>(
     <div style={{background:S,border:"2px solid "+(accentColor||A)+"44",borderRadius:radius+4,padding:"20px 24px",marginBottom:24}}>
       <div style={{marginBottom:4}}>
         <div style={{fontFamily:ff,fontSize:11,letterSpacing:2,color:accentColor||A,textTransform:"uppercase",fontWeight:"bold",marginBottom:4}}>{title}</div>
@@ -1464,19 +1464,9 @@ function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,label
         </div>
       </div>
 
-      <Part
-        title="Part 1 — Weekly Fixed Costs"
-        subtitle="Costs that recur every week at the same amount. Each active item auto-fills the weekly input at its full value."
-        part="weekly"
-        accentColor={A}
-      />
+      {renderPart("Part 1 — Weekly Fixed Costs","Costs that recur every week at the same amount. Each active item auto-fills the weekly input at its full value.","weekly",A)}
 
-      <Part
-        title="Part 2 — Monthly Fixed Costs"
-        subtitle="Costs billed monthly. Each active item auto-fills the weekly input at 1/4 of the monthly amount, shown below the field."
-        part="monthly"
-        accentColor="#7dd3fc"
-      />
+      {renderPart("Part 2 — Monthly Fixed Costs","Costs billed monthly. Each active item auto-fills the weekly input at 1/4 of the monthly amount, shown below the field.","monthly","#7dd3fc")}
 
       {/* Summary */}
       <div style={{padding:"16px 20px",background:S2,border:"1px solid "+BR,borderRadius:radius+2}}>
@@ -1713,7 +1703,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
 }
 
 // ─── Monthly Overview ─────────────────────────────────────────────────────────
-function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opexKeys,depts,labels}){
+function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opexKeys,depts,labels,monthKey}){
   const {S2,BR,A,OA,MU,TX,ff,RD,GR,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
@@ -1755,6 +1745,7 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
       {!part2&&(
         <div>
           <SH>Monthly P&L Summary</SH>
+          {monthDateRange&&<div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:16,marginTop:-8}}>{monthDateRange}</div>}
           <Row>
             <Badge label="Net Revenue" value={mc.netRevenue} color={A}/>
             <Badge label="Gross Profit" value={mc.grossProfit}/>
@@ -2310,11 +2301,11 @@ function TargetsPage({weeks,curWeeks,onUpdateWeeks,activeWeek,labels,monthData,s
   const fixed=null; // not available here, pass via prop if needed
   const inp={background:S2,border:"1px solid "+BR,color:TX,padding:"7px 10px",fontFamily:ff,fontSize:13,outline:"none",borderRadius:radius,width:"100%",boxSizing:"border-box"};
 
-  const TRow=({label,key_,unit="%",hint})=>{
+  const renderTRow=(label,key_,unit="%",hint)=>{
     const val=wt[key_]??globalTargets[key_]??"";
     const isOverride=week?.weekTargets?.[key_]!==undefined;
     return(
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:"1px solid "+BR+"33"}}>
+      <div key={key_} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:"1px solid "+BR+"33"}}>
         <div style={{flex:1}}>
           <div style={{fontFamily:ff,fontSize:12,color:TX}}>{label}</div>
           {hint&&<div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>{hint}</div>}
@@ -2396,15 +2387,15 @@ function TargetsPage({weeks,curWeeks,onUpdateWeeks,activeWeek,labels,monthData,s
         <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+3,padding:"20px 24px"}}>
           <div style={{fontFamily:ff,fontSize:10,letterSpacing:2,color:A,textTransform:"uppercase",marginBottom:4}}>Target Values</div>
           <div style={{fontFamily:ff,fontSize:10,color:MU,marginBottom:14}}>Changes apply to current week and save globally. Week-specific overrides marked in yellow.</div>
-          <TRow label="Gross Margin Target" key_="gross_margin_target" unit="%" hint="Industry benchmark: 50–65%" />
-          <TRow label="Net Margin Target" key_="net_margin_target" unit="%" hint="Healthy range: 12–20%" />
-          <TRow label="Max COGS % of Revenue" key_="cogs_pct_target" unit="%" hint="Keep under 35–45%"/>
-          <TRow label="Max OPEX % of Revenue" key_="opex_pct_target" unit="%" hint="Target: ≤25%"/>
-          <TRow label="Max Wages % of Revenue" key_="wages_pct_target" unit="%" hint="Target: ≤20%"/>
-          <TRow label="Max Promo Discount Rate" key_="promo_disc_rate_max" unit="%" hint="% of gross sales — above this hurts margin"/>
-          <TRow label="Max Refund Rate" key_="refund_rate_max" unit="%" hint="% of gross sales"/>
-          <TRow label="Service Recovery Alert (orders/wk)" key_="service_recovery_max_orders" unit="orders" hint="Fires alert when exceeded"/>
-          <TRow label="Service Recovery Cost Alert ($/order)" key_="service_recovery_cost_alert" unit="$" hint="Average cost before alert fires"/>
+          {renderTRow("Gross Margin Target","gross_margin_target","%","Industry benchmark: 50–65%")}
+          {renderTRow("Net Margin Target","net_margin_target","%","Healthy range: 12–20%")}
+          {renderTRow("Max COGS % of Revenue","cogs_pct_target","%","Keep under 35–45%")}
+          {renderTRow("Max OPEX % of Revenue","opex_pct_target","%","Target: ≤25%")}
+          {renderTRow("Max Wages % of Revenue","wages_pct_target","%","Target: ≤20%")}
+          {renderTRow("Max Promo Discount Rate","promo_disc_rate_max","%","% of gross sales — above this hurts margin")}
+          {renderTRow("Max Refund Rate","refund_rate_max","%","% of gross sales")}
+          {renderTRow("Service Recovery Alert (orders/wk)","service_recovery_max_orders","orders","Fires alert when exceeded")}
+          {renderTRow("Service Recovery Cost Alert ($/order)","service_recovery_cost_alert","$","Average cost before alert fires")}
         </div>
 
         {/* Live alert feed */}
@@ -2753,7 +2744,7 @@ export default function App(){
 
           {tab==="overview"&&!loading&&(
             <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+4,padding:"24px 28px"}}>
-              <MonthlyOverview weeks={curWeeks} fixed={fixed} extras={curExtras} onExtrasChange={updateExtras} onExport={()=>handleExport()} copied={copied} opexKeys={opexKeys} depts={wageDepts} labels={labels}/>
+              <MonthlyOverview weeks={curWeeks} fixed={fixed} extras={curExtras} onExtrasChange={updateExtras} onExport={()=>handleExport()} copied={copied} opexKeys={opexKeys} depts={wageDepts} labels={labels} monthKey={curKey}/>
             </div>
           )}
 
