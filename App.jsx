@@ -307,13 +307,16 @@ function calcWeek(week,fixed,opexKeys,depts){
     const keyDef=keys.find(kd=>kd.key===k);
     if(keyDef?.computed){
       const subKeys=keys.filter(kd=>kd.parent===k);
-      const subSum=subKeys.reduce((s,kd)=>{
-        if(week.opex?.[kd.key]!==""&&week.opex?.[kd.key]!==undefined)return s+n(week.opex[kd.key]);
-        if(fixed?.fixedKeys?.includes(kd.key))return s+n(fixed?.values?.[kd.key]);
-        if(fixed?.monthlyFixedKeys?.includes(kd.key))return s+n(fixed?.monthlyValues?.[kd.key])/4;
-        return s;
-      },0);
-      if(subSum>0)return subSum;
+      const hasAnySub=subKeys.some(kd=>week.opex?.[kd.key]!==""&&week.opex?.[kd.key]!==undefined);
+      if(subKeys.length>0&&hasAnySub){
+        const subSum=subKeys.reduce((s,kd)=>{
+          if(week.opex?.[kd.key]!==""&&week.opex?.[kd.key]!==undefined)return s+n(week.opex[kd.key]);
+          if(fixed?.fixedKeys?.includes(kd.key))return s+n(fixed?.values?.[kd.key]);
+          if(fixed?.monthlyFixedKeys?.includes(kd.key))return s+n(fixed?.monthlyValues?.[kd.key])/4;
+          return s;
+        },0);
+        return subSum; // return even if 0 — sub-keys are the source of truth once any is set
+      }
     }
     // Week-level override takes priority
     if(week.opex?.[k]!==""&&week.opex?.[k]!==undefined)return n(week.opex[k]);
@@ -2548,7 +2551,15 @@ export default function App(){
   const [settings,setSettings]=useState(null);
   const [activeWeek,setActiveWeek]=useState(0);
 
-  const opexKeys=settings?.opexKeys||DEFAULT_OPEX_KEYS;
+  // Merge DEFAULT_OPEX_KEYS metadata (computed/sub/parent) into stored keys so
+  // new structural properties survive even if settings were saved before they existed
+  const opexKeys=(settings?.opexKeys||DEFAULT_OPEX_KEYS).map(k=>{
+    const def=DEFAULT_OPEX_KEYS.find(d=>d.key===k.key)||{};
+    return {...def,...k}; // def first so stored label/group overrides default, but def adds computed/sub/parent
+  });
+  // Also ensure sub-keys from DEFAULT are present (user may have saved before sub-keys were added)
+  const storedKeys=opexKeys.map(k=>k.key);
+  DEFAULT_OPEX_KEYS.forEach(dk=>{if(!storedKeys.includes(dk.key))opexKeys.push(dk);});
   const wageDepts=settings?.wageDepts||DEFAULT_WAGE_DEPTS;
   const staff=settings?.staff||DEFAULT_STAFF;
   const theme=buildTheme(themeRaw);
