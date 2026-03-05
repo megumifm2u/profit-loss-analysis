@@ -36,7 +36,7 @@ function buildTheme(t) {
     A:accent, BG:ap(t.bg), S:ap(t.surface), S2:ap(t.surface2),
     BR:ap(t.border), TX:ap(t.text), MU:ap(t.muted),
     RD:ap(t.red), GR:ap(t.green), YL:ap(t.yellow),
-    OA:contrastColor(accent), // on-accent: text color to use on accent background
+    "#ffffff":contrastColor(accent), // on-accent: text color to use on accent background
     ff:t.bodyFont||"Times New Roman", ffTitle:t.titleFont||"Times New Roman",
     radius:t.borderRadius??4,
     szHeaderTitle:t.headerTitleSize??22,
@@ -721,19 +721,19 @@ function E({value,onSave,style={},multiline=false,styleKey,onStyleSave}){
 }
 
 function TextStylePanel({onStyleSave,onClose,currentStyle}){
-  const {S2,BR,A,OA,MU,TX,ff,radius}=useTheme();
+  const {S2,BR,A,MU,TX,ff,radius}=useTheme();
   const [bold,setBold]=useState(currentStyle?.fontWeight==="bold"||currentStyle?.fontWeight===700);
   const [italic,setItalic]=useState(currentStyle?.fontStyle==="italic");
   const [size,setSize]=useState(parseInt(currentStyle?.fontSize)||12);
   const apply=()=>{onStyleSave({bold,italic,size});onClose();};
   return(
     <div style={{position:"absolute",top:"100%",left:0,zIndex:200,background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"10px 12px",display:"flex",gap:8,alignItems:"center",whiteSpace:"nowrap",boxShadow:"0 8px 24px #00000088"}}>
-      <button onClick={()=>setBold(b=>!b)} style={{background:bold?A:"transparent",border:"1px solid "+(bold?A:BR),color:bold?OA:TX,fontFamily:ff,fontSize:11,fontWeight:"bold",padding:"3px 8px",cursor:"pointer",borderRadius:2}}>B</button>
-      <button onClick={()=>setItalic(i=>!i)} style={{background:italic?A:"transparent",border:"1px solid "+(italic?A:BR),color:italic?OA:TX,fontFamily:ff,fontSize:11,fontStyle:"italic",padding:"3px 8px",cursor:"pointer",borderRadius:2}}>I</button>
+      <button onClick={()=>setBold(b=>!b)} style={{background:bold?A:"transparent",border:"1px solid "+(bold?A:BR),color:bold?"#ffffff":TX,fontFamily:ff,fontSize:11,fontWeight:"bold",padding:"3px 8px",cursor:"pointer",borderRadius:2}}>B</button>
+      <button onClick={()=>setItalic(i=>!i)} style={{background:italic?A:"transparent",border:"1px solid "+(italic?A:BR),color:italic?"#ffffff":TX,fontFamily:ff,fontSize:11,fontStyle:"italic",padding:"3px 8px",cursor:"pointer",borderRadius:2}}>I</button>
       <input type="number" value={size} min={7} max={32} onChange={e=>setSize(parseInt(e.target.value)||12)}
         style={{width:46,background:"transparent",border:"1px solid "+BR,color:TX,fontFamily:ff,fontSize:11,padding:"3px 6px",outline:"none",borderRadius:2,textAlign:"center"}}/>
       <span style={{fontFamily:ff,fontSize:10,color:MU}}>px</span>
-      <button onClick={apply} style={{background:A,border:"none",color:OA,fontFamily:ff,fontSize:10,padding:"4px 10px",cursor:"pointer",borderRadius:2,fontWeight:"bold"}}>Apply</button>
+      <button onClick={apply} style={{background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:10,padding:"4px 10px",cursor:"pointer",borderRadius:2,fontWeight:"bold"}}>Apply</button>
       <button onClick={onClose} style={{background:"transparent",border:"none",color:MU,fontFamily:ff,fontSize:12,cursor:"pointer",padding:"2px 4px"}}>×</button>
     </div>
   );
@@ -757,7 +757,7 @@ function Accordion({title,children,defaultOpen=false,accent=false}){
 
 // ─── Shopify Import ───────────────────────────────────────────────────────────
 function ShopifyImport({week,onChange,labels}){
-  const {S2,BR,A,OA,S,TX,ff,MU,GR,RD,radius}=useTheme();
+  const {S2,BR,A,S,TX,ff,MU,GR,RD,radius}=useTheme();
   const bi=useBI();
   const [raw,setRaw]=useState(week.shopifyRaw||"");
   const [msg,setMsg]=useState("");
@@ -792,8 +792,8 @@ function ShopifyImport({week,onChange,labels}){
       <textarea value={raw} onChange={e=>setRaw(e.target.value)} placeholder="Paste Shopify CSV or tab-separated export here..." rows={4}
         style={{width:"100%",boxSizing:"border-box",background:S,border:"1px solid "+BR,color:TX,padding:"10px 12px",fontFamily:"monospace",fontSize:12,outline:"none",borderRadius:radius,resize:"vertical"}}/>
       <div style={{display:"flex",alignItems:"center",gap:12,marginTop:10,flexWrap:"wrap"}}>
-        <button onClick={apply} style={{padding:"8px 18px",background:A,border:"none",color:OA,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
-          <E value={labels.sec_shopify_btn} onSave={v=>labels._save("sec_shopify_btn",v)} style={{fontFamily:ff,fontSize:12,color:OA}}/>
+        <button onClick={apply} style={{padding:"8px 18px",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
+          <E value={labels.sec_shopify_btn} onSave={v=>labels._save("sec_shopify_btn",v)} style={{fontFamily:ff,fontSize:12,color:"#ffffff"}}/>
         </button>
         {msg&&<span style={{fontFamily:ff,fontSize:12,color:msg.includes("No")?RD:GR}}>{msg}{detail.length?<span style={{color:MU,fontSize:11}}> ({detail.join(", ")})</span>:null}</span>}
       </div>
@@ -868,7 +868,7 @@ function ClearAll({onClear}){
 
 // ─── Week Form ────────────────────────────────────────────────────────────────
 function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,labels}){
-  const {S,S2,BR,A,OA,MU,YL,RD,TX,ff,radius}=useTheme();
+  const {S,S2,BR,A,MU,YL,RD,TX,ff,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   const bi=useBI();
@@ -1119,7 +1119,7 @@ function TargetsPanel({calc,week,labels}){
 
 // ─── Discount Breakdown (per-code) ────────────────────────────────────────────
 function DiscountBreakdown({week,onChange,labels}){
-  const {A,OA,MU,BR,S2,S,TX,GR,RD,YL,BG,ff,radius}=useTheme();
+  const {A,MU,BR,S2,S,TX,GR,RD,YL,BG,ff,radius}=useTheme();
   const bi=useBI();
   const totalDiscounts=n(week.revenue.discounts);
   const codeData=week.codeData||emptyCodeData();
@@ -1231,7 +1231,7 @@ function DiscountBreakdown({week,onChange,labels}){
           placeholder={"RESHIP-FAULTY\t$120.00\t3\nEXCHANGE-SE\t$85.00\t2\n(code · retail amount · number of orders)"}
           style={{width:"100%",boxSizing:"border-box",background:S,border:"1px solid "+BR,color:TX,padding:"8px 10px",fontFamily:"monospace",fontSize:11,outline:"none",borderRadius:radius,resize:"vertical"}}/>
         <div style={{display:"flex",alignItems:"center",gap:10,marginTop:8}}>
-          <button onClick={applyDiscShopify} style={{padding:"7px 16px",background:A,border:"none",color:OA,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>AUTOFILL FROM DATA</button>
+          <button onClick={applyDiscShopify} style={{padding:"7px 16px",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>AUTOFILL FROM DATA</button>
           {discMsg&&<span style={{fontFamily:ff,fontSize:11,color:discMsg.includes("No")||discMsg.includes("Paste")?RD:GR}}>{discMsg}</span>}
         </div>
       </div>
@@ -1380,7 +1380,7 @@ function DiscountBreakdown({week,onChange,labels}){
 
 // ─── Fixed Costs Page ─────────────────────────────────────────────────────────
 function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,labels}){
-  const {S,S2,BR,A,OA,MU,TX,GR,BG,ff,radius}=useTheme();
+  const {S,S2,BR,A,MU,TX,GR,BG,ff,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const displayKeys=keys.filter(k=>!k.sub); // hide sub-keys from fixed costs
   const fixedKeys=fixed?.fixedKeys||[];
@@ -1420,7 +1420,7 @@ function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,label
                 <E value={label} onSave={nl=>renameKey(key,nl)} style={{fontFamily:ff,fontSize:11,color:isActive?A:MU,textTransform:"uppercase",letterSpacing:0.8}}/>
                 <button
                   onClick={()=>part==="weekly"?toggleWeekly(key):toggleMonthly(key)}
-                  style={{background:isActive?A:"transparent",border:"1px solid "+(isActive?A:BR),color:isActive?OA:MU,padding:"2px 8px",fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,whiteSpace:"nowrap",marginLeft:8,textTransform:"uppercase"}}>
+                  style={{background:isActive?A:"transparent",border:"1px solid "+(isActive?A:BR),color:isActive?"#ffffff":MU,padding:"2px 8px",fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,whiteSpace:"nowrap",marginLeft:8,textTransform:"uppercase"}}>
                   {isActive?"Active":"Set"}
                 </button>
               </div>
@@ -1505,7 +1505,7 @@ const COLOR_PRESETS=[
 ];
 
 function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLabelsSave}){
-  const {S2,BR,A,OA,MU,TX,GR,RD,YL,ff,radius}=useTheme();
+  const {S2,BR,A,MU,TX,GR,RD,YL,ff,radius}=useTheme();
   const [themeEdit,setThemeEdit]=useState({...DEFAULT_THEME,...theme});
   const [activeTab,setActiveTab]=useState("appearance");
   const [staff,setStaff]=useState(settings?.staff||DEFAULT_STAFF);
@@ -1527,7 +1527,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
       <div style={{display:"flex",gap:8,marginBottom:24,flexWrap:"wrap"}}>
         {["appearance","colours","targets","staff"].map(t=>(
           <button key={t} onClick={()=>setActiveTab(t)}
-            style={{padding:"8px 16px",background:activeTab===t?A:"transparent",border:"1px solid "+(activeTab===t?A:BR),color:activeTab===t?OA:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
+            style={{padding:"8px 16px",background:activeTab===t?A:"transparent",border:"1px solid "+(activeTab===t?A:BR),color:activeTab===t?"#ffffff":MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
             {t}
           </button>
         ))}
@@ -1582,7 +1582,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
             ))}
           </div>
           <div style={{display:"flex",gap:10}}>
-            <button onClick={apply} style={{flex:1,padding:"11px 0",background:A,border:"none",color:OA,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>{saved?"APPLIED!":"APPLY"}</button>
+            <button onClick={apply} style={{flex:1,padding:"11px 0",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>{saved?"APPLIED!":"APPLY"}</button>
             <button onClick={reset} style={{padding:"11px 20px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius}}>Reset</button>
           </div>
         </div>
@@ -1601,7 +1601,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
               </div>
             ))}
           </Grid>
-          <button onClick={apply} style={{marginTop:16,width:"100%",padding:"11px 0",background:A,border:"none",color:OA,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>{saved?"APPLIED!":"APPLY COLOURS"}</button>
+          <button onClick={apply} style={{marginTop:16,width:"100%",padding:"11px 0",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>{saved?"APPLIED!":"APPLY COLOURS"}</button>
         </div>
       )}
       {activeTab==="staff"&&(
@@ -1704,7 +1704,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
 
 // ─── Monthly Overview ─────────────────────────────────────────────────────────
 function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opexKeys,depts,labels,monthKey}){
-  const {S2,BR,A,OA,MU,TX,ff,RD,GR,radius}=useTheme();
+  const {S2,BR,A,MU,TX,ff,RD,GR,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   const mc=calcMonth(weeks,fixed,extras,keys,wDepts);
@@ -1736,8 +1736,8 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
       <div style={{display:"flex",gap:8,marginBottom:20}}>
         {[{key:"overview_part1",label:labels.overview_part1,i:0},{key:"overview_part2",label:labels.overview_part2,i:1}].map(({key,label,i})=>(
           <button key={i} onClick={()=>setPart2(i===1)}
-            style={{padding:"8px 16px",background:part2===(i===1)?A:"transparent",border:"1px solid "+(part2===(i===1)?A:BR),color:part2===(i===1)?OA:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
-            <E value={label} onSave={v=>labels._save(key,v)} style={{fontFamily:ff,fontSize:11,color:part2===(i===1)?OA:MU}}/>
+            style={{padding:"8px 16px",background:part2===(i===1)?A:"transparent",border:"1px solid "+(part2===(i===1)?A:BR),color:part2===(i===1)?"#ffffff":MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
+            <E value={label} onSave={v=>labels._save(key,v)} style={{fontFamily:ff,fontSize:11,color:part2===(i===1)?"#ffffff":MU}}/>
           </button>
         ))}
       </div>
@@ -1974,7 +1974,7 @@ function VisualisePage({weeks,fixed,allMonthData,opexKeys,depts}){
 
 // ─── Compare Page ─────────────────────────────────────────────────────────────
 function ComparePage({allMonthData,fixed,opexKeys,depts,labels}){
-  const {A,OA,BR,S2,TX,MU,GR,RD,ff,radius}=useTheme();
+  const {A,BR,S2,TX,MU,GR,RD,ff,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   const allKeys=Object.keys(allMonthData).sort();
@@ -2023,7 +2023,7 @@ function ComparePage({allMonthData,fixed,opexKeys,depts,labels}){
       <div style={{display:"flex",gap:8,marginBottom:24}}>
         {[["months","By Month"],["weeks","By Week"],["custom","Custom Range"]].map(([val,lbl])=>(
           <button key={val} onClick={()=>setMode(val)}
-            style={{padding:"7px 14px",background:mode===val?A:"transparent",border:"1px solid "+(mode===val?A:BR),color:mode===val?OA:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
+            style={{padding:"7px 14px",background:mode===val?A:"transparent",border:"1px solid "+(mode===val?A:BR),color:mode===val?"#ffffff":MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
             {lbl}
           </button>
         ))}
@@ -2108,7 +2108,7 @@ function ComparePage({allMonthData,fixed,opexKeys,depts,labels}){
 
 // ─── Reports Page ─────────────────────────────────────────────────────────────
 function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts}){
-  const {S,S2,BR,A,OA,MU,TX,GR,RD,ff,radius}=useTheme();
+  const {S,S2,BR,A,MU,TX,GR,RD,ff,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   const [expanded,setExpanded]=useState(null);
@@ -2187,7 +2187,7 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts}){
               <div style={{padding:"16px 18px",background:RD+"15",border:"1px solid "+RD,margin:"0 0 4px"}}>
                 <div style={{fontFamily:ff,fontSize:13,color:RD,marginBottom:12}}>Delete {mLabel}? This cannot be undone.</div>
                 <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>deleteMonth(key)} style={{padding:"8px 16px",background:RD,border:"none",color:OA,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold"}}>Delete</button>
+                  <button onClick={()=>deleteMonth(key)} style={{padding:"8px 16px",background:RD,border:"none",color:"#ffffff",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold"}}>Delete</button>
                   <button onClick={()=>setDelConfirm(null)} style={{padding:"8px 16px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius}}>Cancel</button>
                 </div>
               </div>
@@ -2212,7 +2212,7 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts}){
                     )}
                     <div style={{display:"flex",gap:10,marginTop:16}}>
                       <button onClick={()=>saveEdit(key)} disabled={saving}
-                        style={{flex:1,padding:"11px 0",background:A,border:"none",color:OA,fontFamily:ff,fontSize:13,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
+                        style={{flex:1,padding:"11px 0",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:13,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
                         {saving?"SAVING...":"SAVE CHANGES"}
                       </button>
                       <button onClick={()=>{setEditing(null);setEditWeeks(null);}}
@@ -2361,7 +2361,7 @@ function TargetsPage({weeks,curWeeks,onUpdateWeeks,activeWeek,labels,monthData,s
             </div>
           )}
           <button onClick={autoCalc} disabled={!weeklyGoal}
-            style={{padding:"9px 20px",background:weeklyGoal?A:"transparent",border:"1px solid "+(weeklyGoal?A:BR),color:weeklyGoal?OA:MU,fontFamily:ff,fontSize:11,cursor:weeklyGoal?"pointer":"not-allowed",borderRadius:radius,fontWeight:"bold",letterSpacing:1,textTransform:"uppercase"}}>
+            style={{padding:"9px 20px",background:weeklyGoal?A:"transparent",border:"1px solid "+(weeklyGoal?A:BR),color:weeklyGoal?"#ffffff":MU,fontFamily:ff,fontSize:11,cursor:weeklyGoal?"pointer":"not-allowed",borderRadius:radius,fontWeight:"bold",letterSpacing:1,textTransform:"uppercase"}}>
             Auto-Calculate All Targets
           </button>
         </div>
@@ -2472,7 +2472,7 @@ function AlertCard({alert}){
 
 // ─── Password Screen ──────────────────────────────────────────────────────────
 function PasswordScreen({onAuth,labels}){
-  const {BG,BR,TX,A,OA,MU,RD,ff}=useTheme();
+  const {BG,BR,TX,A,MU,RD,ff}=useTheme();
   const [pw,setPw]=useState(""),[ err,setErr]=useState(false);
   const check=()=>{if(!PASSWORD||pw===PASSWORD){onAuth();}else{setErr(true);setTimeout(()=>setErr(false),1400);}};
   return(
@@ -2487,7 +2487,7 @@ function PasswordScreen({onAuth,labels}){
           style={{width:"100%",boxSizing:"border-box",background:"transparent",border:"1px solid "+(err?RD:BR),color:TX,padding:"14px 16px",fontFamily:ff,fontSize:13,outline:"none",borderRadius:2,letterSpacing:4,textAlign:"center",marginBottom:10,transition:"border-color 0.2s"}}/>
         {err&&<div style={{color:RD,fontSize:10,textAlign:"center",letterSpacing:2,textTransform:"uppercase",marginBottom:8}}>Incorrect Password</div>}
         <button onClick={check} style={{width:"100%",padding:"13px 0",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:2,letterSpacing:5,textTransform:"uppercase"}}
-          onMouseEnter={e=>{e.target.style.background=A;e.target.style.color=OA;}} onMouseLeave={e=>{e.target.style.background="transparent";e.target.style.color=A;}}>
+          onMouseEnter={e=>{e.target.style.background=A;e.target.style.color="#ffffff";}} onMouseLeave={e=>{e.target.style.background="transparent";e.target.style.color=A;}}>
           Enter
         </button>
       </div>
@@ -2641,7 +2641,7 @@ export default function App(){
     </ThemeContext.Provider>
   );
 
-  const {A,OA,BG,S,S2,BR,TX,MU,ff,ffTitle,radius,GR,RD,szHeaderTitle,szHeaderBrand}=theme;
+  const {A,BG,S,S2,BR,TX,MU,ff,ffTitle,radius,GR,RD,szHeaderTitle,szHeaderBrand}=theme;
 
   const TABS=[
     {id:"input",key:"tab_input"},{id:"overview",key:"tab_overview"},{id:"visualise",key:"tab_visualise"},
@@ -2705,8 +2705,8 @@ export default function App(){
                   <E value={selMonth?.label+" — "+(labels.header_subtitle||"weeks auto-dated Mon-Sun")} onSave={v=>labels._save("header_subtitle",v.includes("—")?v.split("—").slice(1).join("—").trim():v)} style={{fontFamily:ff,fontSize:11,color:MU}}/>
                 </div>
                 <button onClick={()=>handleExport()}
-                  style={{padding:"9px 16px",background:copied?A:"transparent",border:"1px solid "+A,color:copied?OA:A,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
-                  <E value={labels.btn_generate_export} onSave={v=>labels._save("btn_generate_export",v)} style={{fontFamily:ff,fontSize:11,color:copied?OA:A}}/>{copied?" ✓":""}
+                  style={{padding:"9px 16px",background:copied?A:"transparent",border:"1px solid "+A,color:copied?"#ffffff":A,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
+                  <E value={labels.btn_generate_export} onSave={v=>labels._save("btn_generate_export",v)} style={{fontFamily:ff,fontSize:11,color:copied?"#ffffff":A}}/>{copied?" ✓":""}
                 </button>
               </div>
 
