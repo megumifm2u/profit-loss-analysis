@@ -247,7 +247,7 @@ function emptyWeek(weekNum,dateRange,label,depts,opexKeys){
   };
 }
 function emptyExtras(keys){return {opex:emptyOpex(keys),notes:""};}
-function emptyFixed(keys){return {values:emptyOpex(keys),fixedKeys:[],satchelCostDefault:"0.85"};}
+function emptyFixed(keys){return {values:emptyOpex(keys),fixedKeys:[],monthlyValues:emptyOpex(keys),monthlyFixedKeys:[],satchelCostDefault:"0.85"};}
 
 // Compute reclassified discount amounts from buckets
 function calcDiscReclassification(discBuckets){
@@ -300,12 +300,17 @@ function calcWeek(week,fixed,opexKeys,depts){
       const subSum=subKeys.reduce((s,kd)=>{
         if(week.opex?.[kd.key]!==""&&week.opex?.[kd.key]!==undefined)return s+n(week.opex[kd.key]);
         if(fixed?.fixedKeys?.includes(kd.key))return s+n(fixed?.values?.[kd.key]);
+        if(fixed?.monthlyFixedKeys?.includes(kd.key))return s+n(fixed?.monthlyValues?.[kd.key])/4;
         return s;
       },0);
       if(subSum>0)return subSum;
     }
+    // Week-level override takes priority
     if(week.opex?.[k]!==""&&week.opex?.[k]!==undefined)return n(week.opex[k]);
+    // Weekly fixed cost (full amount each week)
     if(fixed?.fixedKeys?.includes(k))return n(fixed?.values?.[k]);
+    // Monthly fixed cost (divided by 4 weeks)
+    if(fixed?.monthlyFixedKeys?.includes(k))return n(fixed?.monthlyValues?.[k])/4;
     return 0;
   };
   // Exclude sub-keys from totals (they roll up into parent computed key)
@@ -857,13 +862,16 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
 
   const opexField=(key,label)=>{
     const isFixed=fixed?.fixedKeys?.includes(key);
+    const isMonthly=fixed?.monthlyFixedKeys?.includes(key);
     const hasFixed=isFixed&&n(fixed?.values?.[key])>0;
+    const hasMonthly=isMonthly&&n(fixed?.monthlyValues?.[key])>0;
     const weekHasVal=week.opex?.[key]!=="";
-    const tint=hasFixed&&!weekHasVal?"#1c1730":undefined;
-    const display=weekHasVal?week.opex[key]:(hasFixed?fixed.values[key]:"");
+    const tint=!weekHasVal&&(hasFixed||hasMonthly)?"#1c1730":undefined;
+    const displayVal=weekHasVal?week.opex[key]:hasFixed?fixed.values[key]:hasMonthly?(n(fixed.monthlyValues[key])/4).toFixed(2):"";
     return(
       <Fld key={key} label={<E value={label} onSave={nl=>renameOpex(key,nl)} style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:0.8}}/>}>
-        <CI value={display} onChange={v=>upO(key,v)} tint={tint}/>
+        <CI value={displayVal} onChange={v=>upO(key,v)} tint={tint}/>
+        {!weekHasVal&&hasMonthly&&<div style={{fontFamily:ff,fontSize:9,color:MU,marginTop:2}}>÷4 of {fmtD(n(fixed.monthlyValues[key]))}/mo</div>}
       </Fld>
     );
   };
@@ -1346,39 +1354,79 @@ function DiscountBreakdown({week,onChange,labels}){
 
 // ─── Fixed Costs Page ─────────────────────────────────────────────────────────
 function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,labels}){
-  const {S2,BR,A,MU,ff,radius}=useTheme();
+  const {S,S2,BR,A,MU,TX,GR,ff,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
-  const total=keys.reduce((s,{key})=>s+n(fixed?.values?.[key]||0),0);
+  const displayKeys=keys.filter(k=>!k.sub); // hide sub-keys from fixed costs
   const fixedKeys=fixed?.fixedKeys||[];
-  const toggle=k=>{const nk=fixedKeys.includes(k)?fixedKeys.filter(x=>x!==k):[...fixedKeys,k];onChange({...fixed,fixedKeys:nk});};
+  const monthlyFixedKeys=fixed?.monthlyFixedKeys||[];
+  const toggleWeekly=k=>{
+    const nk=fixedKeys.includes(k)?fixedKeys.filter(x=>x!==k):[...fixedKeys,k];
+    // remove from monthly if adding to weekly
+    const nm=monthlyFixedKeys.filter(x=>x!==k);
+    onChange({...fixed,fixedKeys:nk,monthlyFixedKeys:nm});
+  };
+  const toggleMonthly=k=>{
+    const nm=monthlyFixedKeys.includes(k)?monthlyFixedKeys.filter(x=>x!==k):[...monthlyFixedKeys,k];
+    // remove from weekly if adding to monthly
+    const nk=fixedKeys.filter(x=>x!==k);
+    onChange({...fixed,fixedKeys:nk,monthlyFixedKeys:nm});
+  };
   const renameKey=(key,nl)=>{if(onSettingsChange){const nk=keys.map(k=>k.key===key?{...k,label:nl}:k);onSettingsChange({...settings,opexKeys:nk});}};
-  const renderGroup=(groupKeys,titleLabelKey)=>(
-    <div style={{marginBottom:20}}>
+
+  const weeklyTotal=displayKeys.reduce((s,{key})=>s+n(fixed?.values?.[key]||0),0);
+  const monthlyTotal=displayKeys.reduce((s,{key})=>s+n(fixed?.monthlyValues?.[key]||0),0);
+  const weeklyFromMonthly=monthlyTotal/4;
+  const totalWeeklyImpact=weeklyTotal+weeklyFromMonthly;
+
+  const renderGroup=(groupKeys,titleLabelKey,part)=>(
+    <div style={{marginBottom:16}}>
       <SH sub><E value={labels[titleLabelKey]||groupKeys[0]?.group||"Group"} onSave={v=>labels._save(titleLabelKey,v)} style={{color:"inherit",fontFamily:ff}}/></SH>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
-        {groupKeys.map(({key,label})=>{
-          const isF=fixedKeys.includes(key);
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
+        {groupKeys.filter(k=>!k.sub).map(({key,label})=>{
+          const isW=fixedKeys.includes(key);
+          const isM=monthlyFixedKeys.includes(key);
+          const isActive=part==="weekly"?isW:isM;
+          const val=part==="weekly"?(fixed?.values?.[key]||""):(fixed?.monthlyValues?.[key]||"");
+          const weeklyAmt=isM?n(fixed?.monthlyValues?.[key]||0)/4:0;
           return(
-            <div key={key} style={{background:isF?"#1c1730":S2,border:"1px solid "+(isF?A:BR),borderRadius:radius+1,padding:"10px 12px"}}>
+            <div key={key} style={{background:isActive?"#1c1730":S2,border:"1px solid "+(isActive?A:BR),borderRadius:radius+1,padding:"10px 12px"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                <E value={label} onSave={nl=>renameKey(key,nl)} style={{fontFamily:ff,fontSize:11,color:isF?A:MU,textTransform:"uppercase",letterSpacing:0.8}}/>
-                <button onClick={()=>toggle(key)} style={{background:isF?A:"transparent",border:"1px solid "+(isF?A:BR),color:isF?"#000":MU,padding:"2px 8px",fontFamily:ff,fontSize:10,cursor:"pointer",borderRadius:radius,letterSpacing:1,whiteSpace:"nowrap",marginLeft:8}}>
-                  {isF?"FIXED":"SET FIXED"}
+                <E value={label} onSave={nl=>renameKey(key,nl)} style={{fontFamily:ff,fontSize:11,color:isActive?A:MU,textTransform:"uppercase",letterSpacing:0.8}}/>
+                <button
+                  onClick={()=>part==="weekly"?toggleWeekly(key):toggleMonthly(key)}
+                  style={{background:isActive?A:"transparent",border:"1px solid "+(isActive?A:BR),color:isActive?"#000":MU,padding:"2px 8px",fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,whiteSpace:"nowrap",marginLeft:8,textTransform:"uppercase"}}>
+                  {isActive?"Active":"Set"}
                 </button>
               </div>
-              <CI value={fixed?.values?.[key]||""} onChange={v=>onChange({...fixed,values:{...fixed.values,[key]:v}})}/>
+              <CI value={val} onChange={v=>part==="weekly"
+                ?onChange({...fixed,values:{...(fixed.values||{}), [key]:v}})
+                :onChange({...fixed,monthlyValues:{...(fixed.monthlyValues||{}), [key]:v}})}/>
+              {part==="monthly"&&isM&&weeklyAmt>0&&(
+                <div style={{fontFamily:ff,fontSize:9,color:A,marginTop:4}}>= {fmtD(weeklyAmt)}/week</div>
+              )}
             </div>
           );
         })}
       </div>
     </div>
   );
+
+  const Part=({title,subtitle,part,accentColor})=>(
+    <div style={{background:S,border:"2px solid "+(accentColor||A)+"44",borderRadius:radius+4,padding:"20px 24px",marginBottom:24}}>
+      <div style={{marginBottom:4}}>
+        <div style={{fontFamily:ff,fontSize:11,letterSpacing:2,color:accentColor||A,textTransform:"uppercase",fontWeight:"bold",marginBottom:4}}>{title}</div>
+        <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:16,lineHeight:1.6}}>{subtitle}</div>
+      </div>
+      {renderGroup(displayKeys.filter(k=>k.group==="freight"),"sec_freight",part)}
+      {renderGroup(displayKeys.filter(k=>k.group==="collabs"),"sec_collabs",part)}
+      {renderGroup(displayKeys.filter(k=>k.group==="general"),"sec_general",part)}
+    </div>
+  );
+
   return(
     <div>
-      <div style={{fontFamily:ff,fontSize:13,color:MU,marginBottom:20,lineHeight:1.8}}>
-        <E value={labels.fixed_help} onSave={v=>labels._save("fixed_help",v)} style={{fontFamily:ff,fontSize:13,color:MU}} multiline/>
-      </div>
-      <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+1,padding:"12px 16px",marginBottom:20}}>
+      {/* Satchel cost */}
+      <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+1,padding:"12px 16px",marginBottom:24}}>
         <div style={{fontFamily:ff,fontSize:10,letterSpacing:1.5,color:A,textTransform:"uppercase",marginBottom:10}}>
           <E value={labels.fixed_satchel_label} onSave={v=>labels._save("fixed_satchel_label",v)} style={{color:A,fontFamily:ff,fontSize:10}}/>
         </div>
@@ -1389,14 +1437,41 @@ function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,label
           </span>
         </div>
       </div>
-      {renderGroup(keys.filter(k=>k.group==="freight"),"sec_freight")}
-      {renderGroup(keys.filter(k=>k.group==="collabs"),"sec_collabs")}
-      {renderGroup(keys.filter(k=>k.group==="general"),"sec_general")}
-      <div style={{marginTop:16,padding:"12px 16px",background:S2,border:"1px solid "+BR,borderRadius:radius+1}}>
-        <span style={{fontFamily:ff,fontSize:13,color:MU}}>Monthly fixed total: </span>
-        <span style={{fontFamily:ff,fontSize:15,color:A,fontWeight:"bold"}}>{fmtD(total)}</span>
-        <span style={{fontFamily:ff,fontSize:12,color:MU,marginLeft:12}}>({fmtD(total/4.33)} /wk avg)</span>
-        <span style={{fontFamily:ff,fontSize:12,color:A,marginLeft:16}}>{fixedKeys.length} items auto-populate weekly</span>
+
+      <Part
+        title="Part 1 — Weekly Fixed Costs"
+        subtitle="Costs that recur every week at the same amount. Each active item auto-fills the weekly input at its full value."
+        part="weekly"
+        accentColor={A}
+      />
+
+      <Part
+        title="Part 2 — Monthly Fixed Costs"
+        subtitle="Costs billed monthly. Each active item auto-fills the weekly input at 1/4 of the monthly amount, shown below the field."
+        part="monthly"
+        accentColor="#7dd3fc"
+      />
+
+      {/* Summary */}
+      <div style={{padding:"16px 20px",background:S2,border:"1px solid "+BR,borderRadius:radius+2}}>
+        <div style={{fontFamily:ff,fontSize:10,letterSpacing:1.5,color:A,textTransform:"uppercase",marginBottom:12}}>Weekly Cost Summary</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12}}>
+          <div style={{background:"#0a0a0e",borderRadius:radius,padding:"10px 14px",borderLeft:"3px solid "+A}}>
+            <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:4}}>Weekly Fixed ({fixedKeys.length} items)</div>
+            <div style={{fontFamily:ff,fontSize:16,color:A,fontWeight:"bold"}}>{fmtD(weeklyTotal)}</div>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>fills at full amount each week</div>
+          </div>
+          <div style={{background:"#0a0a0e",borderRadius:radius,padding:"10px 14px",borderLeft:"3px solid #7dd3fc"}}>
+            <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:4}}>Monthly Fixed ({monthlyFixedKeys.length} items)</div>
+            <div style={{fontFamily:ff,fontSize:16,color:"#7dd3fc",fontWeight:"bold"}}>{fmtD(monthlyTotal)}/mo</div>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>{fmtD(weeklyFromMonthly)}/week (÷4)</div>
+          </div>
+          <div style={{background:"#0a0a0e",borderRadius:radius,padding:"10px 14px",borderLeft:"3px solid "+GR}}>
+            <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:4}}>Total Weekly Auto-Fill</div>
+            <div style={{fontFamily:ff,fontSize:16,color:GR,fontWeight:"bold"}}>{fmtD(totalWeeklyImpact)}</div>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>auto-applied to every week</div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -2344,21 +2419,21 @@ function generateAlerts(week,netRev,dr,gross,targets){
 
   if(weeklyRevenueTarget>0&&gross<weeklyRevenueTarget){
     const gap=weeklyRevenueTarget-gross;
-    alerts.push({sev:"alert",icon:"📉",title:"Revenue below target",action:`You are ${fmtD(gap)} short of your weekly revenue goal. Review your marketing spend and conversion — are ads running? Any pending campaigns to push?`,metric:`${fmtD(gross)} of ${fmtD(weeklyRevenueTarget)} target`});
+    alerts.push({sev:"alert",title:"Revenue below target",action:`You are ${fmtD(gap)} short of your weekly revenue goal. Review your marketing spend and conversion — are ads running? Any pending campaigns to push?`,metric:`${fmtD(gross)} of ${fmtD(weeklyRevenueTarget)} target`});
   }
   if(promoRate>t.promo_disc_rate_max){
     const excess=promoDisc-gross*(t.promo_disc_rate_max/100);
-    alerts.push({sev:"alert",icon:"🏷️",title:"Discounting too aggressively",action:`Your promo discount rate is ${promoRate.toFixed(1)}% of gross sales — ${(promoRate-t.promo_disc_rate_max).toFixed(1)}% over the ${t.promo_disc_rate_max}% limit. You gave away an extra ${fmtD(excess)} that came straight off your margin. Reduce sale frequency or cut discount depth by 5%.`,metric:`${promoRate.toFixed(1)}% vs ${t.promo_disc_rate_max}% target`});
+    alerts.push({sev:"alert",title:"Discounting too aggressively",action:`Your promo discount rate is ${promoRate.toFixed(1)}% of gross sales — ${(promoRate-t.promo_disc_rate_max).toFixed(1)}% over the ${t.promo_disc_rate_max}% limit. You gave away an extra ${fmtD(excess)} that came straight off your margin. Reduce sale frequency or cut discount depth by 5%.`,metric:`${promoRate.toFixed(1)}% vs ${t.promo_disc_rate_max}% target`});
   }
   if(refundRate>t.refund_rate_max){
     const excess=refunds-gross*(t.refund_rate_max/100);
-    alerts.push({sev:"warn",icon:"↩️",title:"Refund rate elevated",action:`Refunds are ${refundRate.toFixed(1)}% of sales — ${fmtD(excess)} above normal. Check for product issues, sizing complaints, or delayed orders causing refund requests.`,metric:`${refundRate.toFixed(1)}% vs ${t.refund_rate_max}% target`});
+    alerts.push({sev:"warn",title:"Refund rate elevated",action:`Refunds are ${refundRate.toFixed(1)}% of sales — ${fmtD(excess)} above normal. Check for product issues, sizing complaints, or delayed orders causing refund requests.`,metric:`${refundRate.toFixed(1)}% vs ${t.refund_rate_max}% target`});
   }
   if(srOrders>0&&srOrders>=t.service_recovery_max_orders){
-    alerts.push({sev:"warn",icon:"📦",title:"Too many service recovery orders",action:`${srOrders} orders required service recovery this week (threshold: ${t.service_recovery_max_orders}). Check which codes are firing most — RESHIP-FAULTY or CS-ERROR suggest a packing/QC issue that ops should review immediately.`,metric:`${srOrders} orders`});
+    alerts.push({sev:"warn",title:"Too many service recovery orders",action:`${srOrders} orders required service recovery this week (threshold: ${t.service_recovery_max_orders}). Check which codes are firing most — RESHIP-FAULTY or CS-ERROR suggest a packing/QC issue that ops should review immediately.`,metric:`${srOrders} orders`});
   }
   if(srCostPerOrder>0&&srCostPerOrder>=t.service_recovery_cost_alert){
-    alerts.push({sev:"warn",icon:"💸",title:"Service recovery cost per order is high",action:`Each service recovery order is costing you ${fmtD(srCostPerOrder)} on average. At this rate you'd spend ${fmtD(srCostPerOrder*52)} per year on errors. Identify the most frequent failure mode and fix the root cause.`,metric:`${fmtD(srCostPerOrder)}/order vs ${fmtD(t.service_recovery_cost_alert)} threshold`});
+    alerts.push({sev:"warn",title:"Service recovery cost per order is high",action:`Each service recovery order is costing you ${fmtD(srCostPerOrder)} on average. At this rate you'd spend ${fmtD(srCostPerOrder*52)} per year on errors. Identify the most frequent failure mode and fix the root cause.`,metric:`${fmtD(srCostPerOrder)}/order vs ${fmtD(t.service_recovery_cost_alert)} threshold`});
   }
   return alerts;
 }
@@ -2369,7 +2444,6 @@ function AlertCard({alert}){
   return(
     <div style={{background:col+"0f",border:"1px solid "+col+"44",borderRadius:radius+1,padding:"12px 14px",marginBottom:8}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-        <span style={{fontSize:14,lineHeight:1}}>{alert.icon}</span>
         <span style={{fontFamily:ff,fontSize:12,color:col,fontWeight:"bold"}}>{alert.title}</span>
         <span style={{fontFamily:ff,fontSize:10,color:col+"99",marginLeft:"auto",whiteSpace:"nowrap"}}>{alert.metric}</span>
       </div>
