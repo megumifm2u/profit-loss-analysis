@@ -172,9 +172,10 @@ const DEFAULT_OPEX_KEYS = [
 ];
 
 const DEFAULT_WAGE_DEPTS = [
-  {key:"ops",label:"Operations",subs:[
-    {key:"ops_retail",label:"Retail"},
+  {key:"ops",label:"Operations Department",subs:[
+    {key:"ops_operations",label:"Operations"},
     {key:"ops_logistics",label:"Logistics"},
+    {key:"ops_retail",label:"Retail"},
     {key:"ops_cs",label:"Customer Service"},
   ]},
   {key:"marketing",label:"Marketing",subs:[{key:"marketing_dept",label:"Marketing"}]},
