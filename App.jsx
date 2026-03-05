@@ -101,6 +101,7 @@ const DEFAULT_LABELS = {
   disc_field_codes:"Discount codes in this bucket (comma separated)",
   // Buttons
   btn_generate_export:"GENERATE EXPORT", btn_generate_export_sub:"paste into claude for deep insights",
+  btn_monthly_export:"GENERATE EXPORT", btn_monthly_export_sub:"paste into claude for deep insights",
   btn_monthly_summary:"Generate Monthly Summary", btn_monthly_summary_sub:"copy for notion / export",
   btn_compare_export:"GENERATE EXPORT", btn_compare_export_sub:"comparative analysis export for claude",
   btn_weekly_budget_export:"GENERATE BUDGET PLAN", btn_weekly_budget_export_sub:"next week staffing and budget guide",
@@ -1875,8 +1876,8 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
           <div style={{display:"flex",gap:10,marginTop:24}}>
             <button onClick={onExport}
               style={{flex:1,padding:"13px 0",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
-              <div><E value={labels.btn_generate_export} onSave={v=>labels._save("btn_generate_export",v)} style={{color:A,fontFamily:ff,fontSize:12}}/>{copied?" - Copied!":""}</div>
-              <div style={{fontSize:9,color:MU,marginTop:2}}><E value={labels.btn_generate_export_sub} onSave={v=>labels._save("btn_generate_export_sub",v)} style={{color:MU,fontFamily:ff,fontSize:9}}/></div>
+              <div><E value={labels.btn_monthly_export} onSave={v=>labels._save("btn_monthly_export",v)} style={{color:A,fontFamily:ff,fontSize:12}}/>{copied?" - Copied!":""}</div>
+              <div style={{fontSize:9,color:MU,marginTop:2}}><E value={labels.btn_monthly_export_sub} onSave={v=>labels._save("btn_monthly_export_sub",v)} style={{color:MU,fontFamily:ff,fontSize:9}}/></div>
             </button>
             <button onClick={copySummary}
               style={{flex:1,padding:"13px 0",background:S2,border:"1px solid "+BR,color:TX,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
