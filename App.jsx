@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, createContext, useContext, useMemo, Component } from "react";
+import React, { useState, useEffect, useRef, useCallback, createContext, useContext, useMemo, Component } from "react";
 
 // ─── Error Boundary ───────────────────────────────────────────────────────────
 class ErrorBoundary extends Component {
@@ -1278,7 +1278,7 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                       const status=p.netSales<=0&&p.gross>0?"GIFTED":p.marginPct<productTarget?"LOW":"OK";
                       const sc=status==="GIFTED"?RD:status==="LOW"?"#f59e0b":GR;
                       return(
-                        <React.Fragment key={i}>
+                        <>{/* key workaround */}
                           <tr style={{borderBottom:expandedProduct===p.product?"none":"1px solid "+BR+"33",background:i%2===0?"transparent":S+"44",cursor:"pointer"}}
                             onClick={()=>setExpandedProduct(expandedProduct===p.product?null:p.product)}>
                             <td style={{padding:"7px 8px",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
@@ -1317,7 +1317,7 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                               </td>
                             </tr>
                           )}
-                        </React.Fragment>
+                        </>
                       );
                     })}
                   </tbody>
