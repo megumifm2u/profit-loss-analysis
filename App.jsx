@@ -1836,14 +1836,11 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
   const copySummary=()=>{
     const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
     const heading=rangeLabel?"Date Range Report: "+rangeLabel:"Monthly P&L Summary";
-    let t="## "+heading+"\n\n**Net Revenue:** "+fmt(rNetRev)+"\n**Gross Profit:** "+fmt(rGrossProfit)+" ("+rGrossMargin.toFixed(1)+"%)
-**Total Expenses:** "+fmt(rTotalExpenses)+"\n**Net Profit:** "+fmt(rNetProfit)+" ("+rNetMargin.toFixed(1)+"%)
-\n";
+    let t="## "+heading+"\n\n**Net Revenue:** "+fmt(rNetRev)+"\n**Gross Profit:** "+fmt(rGrossProfit)+" ("+rGrossMargin.toFixed(1)+"%)\n**Total Expenses:** "+fmt(rTotalExpenses)+"\n**Net Profit:** "+fmt(rNetProfit)+" ("+rNetMargin.toFixed(1)+"%)\n\n";
     t+="### Discount Reclassification\n";
     t+="Service Recovery: "+fmt(totalDR.serviceRecoveryCOGS)+" | Marketing: "+fmt(totalDR.marketingDisc)+" | Staff: "+fmt(totalDR.staffDisc)+" | True Promo: "+fmt(totalDR.promoDisc)+"\n\n";
     t+="### Week Breakdown\n";
-    weeks.forEach((w,i)=>{const c=rCalcs[i];const f=factors[i];if(f===0)return;t+="**"+w.label+(f<1?" ("+Math.round(f*7)+"d pro-rated)":"")+"** ("+w.dateRange+") - Rev: "+fmt(c.netRevenue)+" | GP: "+c.grossMargin.toFixed(1)+"% | Net: "+fmt(c.netProfit)+" ("+c.netMargin.toFixed(1)+"%)
-";});
+    weeks.forEach((w,i)=>{const c=rCalcs[i];const f=factors[i];if(f===0)return;t+="**"+w.label+(f<1?" ("+Math.round(f*7)+"d pro-rated)":"")+"** ("+w.dateRange+") - Rev: "+fmt(c.netRevenue)+" | GP: "+c.grossMargin.toFixed(1)+"% | Net: "+fmt(c.netProfit)+" ("+c.netMargin.toFixed(1)+"%)\n";});
     navigator.clipboard.writeText(t);setSumCopied(true);setTimeout(()=>setSumCopied(false),3000);
   };
 
