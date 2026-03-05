@@ -556,29 +556,38 @@ function parseShopify(raw){
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────
-function generateExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,labels){
+function generateExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,labels,factors){
   const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
   const pct=(v,b)=>b>0?((v/b)*100).toFixed(1)+"%":"0.0%";
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   const mc=calcMonth(weeks,fixed,extras,keys,wDepts);
-  const gSales=weeks.reduce((s,w)=>s+n(w.revenue.gross_sales),0);
-  const tDisc=weeks.reduce((s,w)=>s+n(w.revenue.discounts),0);
-  let o="=== P&L ANALYSIS - "+mLabel+" ===\nGenerated: "+new Date().toLocaleDateString("en-AU")+"\n\n";
-  o+="--- MONTHLY SUMMARY ---\n";
+  const wFactors=factors||weeks.map(()=>1);
+  const pRate=(wc,i)=>{const f=wFactors[i];return{netRevenue:wc.netRevenue*f,totalCOGS:wc.totalCOGS*f,grossProfit:wc.grossProfit*f,grossMargin:wc.grossMargin,netMargin:wc.netMargin,totalFreight:wc.totalFreight*f,totalCollabs:wc.totalCollabs*f,totalWages:wc.totalWages*f,totalOPEX:wc.totalOPEX*f,totalExpenses:wc.totalExpenses*f,netProfit:wc.netProfit*f,truePromoDisc:(wc.truePromoDisc||0)*f,satchel:(wc.satchel||0)*f,discReclass:{serviceRecoveryCOGS:(wc.discReclass?.serviceRecoveryCOGS||0)*f,serviceRecoveryOrders:Math.round((wc.discReclass?.serviceRecoveryOrders||0)*f),marketingDisc:(wc.discReclass?.marketingDisc||0)*f,staffDisc:(wc.discReclass?.staffDisc||0)*f,promoDisc:(wc.discReclass?.promoDisc||0)*f}};};
+  const rCalcsE=mc.weekCalcs.map((wc,i)=>pRate(wc,i));
+  const rSumE=k=>rCalcsE.filter((_,i)=>wFactors[i]>0).reduce((s,c)=>s+(c[k]||0),0);
+  const rNetRevE=rSumE("netRevenue"),rGrossProfitE=rSumE("grossProfit"),rTotalCOGSE=rSumE("totalCOGS");
+  const rTotalExpensesE=rSumE("totalExpenses"),rNetProfitE=rSumE("netProfit");
+  const rGrossMarginE=rNetRevE>0?(rGrossProfitE/rNetRevE)*100:0,rNetMarginE=rNetRevE>0?(rNetProfitE/rNetRevE)*100:0;
+  const rTotalFreightE=rSumE("totalFreight"),rTotalCollabsE=rSumE("totalCollabs"),rTotalWagesE=rSumE("totalWages"),rTotalOPEXE=rSumE("totalOPEX");
+  const gSales=weeks.reduce((s,w,i)=>s+n(w.revenue.gross_sales)*wFactors[i],0);
+  const tDisc=weeks.reduce((s,w,i)=>s+n(w.revenue.discounts)*wFactors[i],0);
+  const hasRange=factors&&factors.some(f=>f<1||f===0);
+  let o="=== P&L ANALYSIS - "+mLabel+(hasRange?" [DATE RANGE REPORT]":"")+" ===\nGenerated: "+new Date().toLocaleDateString("en-AU")+"\n\n";
+  o+="--- "+(hasRange?"DATE RANGE":"MONTHLY")+" SUMMARY ---\n";
   o+="Gross Sales: "+fmt(gSales)+" | Total Discounts (all codes): "+fmt(tDisc)+" ("+pct(tDisc,gSales)+" of gross)\n";
-  o+="Net Revenue (after true promo discounts only): "+fmt(mc.netRevenue)+"\n";
-  o+="Total COGS (incl. service recovery): "+fmt(mc.totalCOGS)+" | Gross Profit: "+fmt(mc.grossProfit)+" ("+mc.grossMargin.toFixed(1)+"%)\n";
-  o+="Freight: "+fmt(mc.totalFreight)+" | Collabs: "+fmt(mc.totalCollabs)+" | Wages (incl. staff discounts): "+fmt(mc.totalWages)+" | OPEX (incl. influencer gifting): "+fmt(mc.totalOPEX)+"\n";
-  o+="Total Expenses: "+fmt(mc.totalExpenses)+" | NET PROFIT: "+fmt(mc.netProfit)+" ("+mc.netMargin.toFixed(1)+"%)\n\n";
+  o+="Net Revenue (after true promo discounts only): "+fmt(rNetRevE)+"\n";
+  o+="Total COGS (incl. service recovery): "+fmt(rTotalCOGSE)+" | Gross Profit: "+fmt(rGrossProfitE)+" ("+rGrossMarginE.toFixed(1)+"%)\n";
+  o+="Freight: "+fmt(rTotalFreightE)+" | Collabs: "+fmt(rTotalCollabsE)+" | Wages (incl. staff discounts): "+fmt(rTotalWagesE)+" | OPEX (incl. influencer gifting): "+fmt(rTotalOPEXE)+"\n";
+  o+="Total Expenses: "+fmt(rTotalExpensesE)+" | NET PROFIT: "+fmt(rNetProfitE)+" ("+rNetMarginE.toFixed(1)+"%)\n\n";
 
   // Discount reclassification summary
-  const totalDR=mc.weekCalcs.reduce((s,c)=>({
-    serviceRecoveryCOGS:s.serviceRecoveryCOGS+c.discReclass.serviceRecoveryCOGS,
-    serviceRecoveryOrders:s.serviceRecoveryOrders+c.discReclass.serviceRecoveryOrders,
-    marketingDisc:s.marketingDisc+c.discReclass.marketingDisc,
-    staffDisc:s.staffDisc+c.discReclass.staffDisc,
-    promoDisc:s.promoDisc+c.discReclass.promoDisc,
+  const totalDR=rCalcsE.filter((_,i)=>wFactors[i]>0).reduce((s,c)=>({
+    serviceRecoveryCOGS:s.serviceRecoveryCOGS+(c.discReclass?.serviceRecoveryCOGS||0),
+    serviceRecoveryOrders:s.serviceRecoveryOrders+(c.discReclass?.serviceRecoveryOrders||0),
+    marketingDisc:s.marketingDisc+(c.discReclass?.marketingDisc||0),
+    staffDisc:s.staffDisc+(c.discReclass?.staffDisc||0),
+    promoDisc:s.promoDisc+(c.discReclass?.promoDisc||0),
   }),{serviceRecoveryCOGS:0,serviceRecoveryOrders:0,marketingDisc:0,staffDisc:0,promoDisc:0});
   o+="--- DISCOUNT RECLASSIFICATION ---\n";
   o+="Service Recovery (ops expense / COGS): "+fmt(totalDR.serviceRecoveryCOGS)+" | "+totalDR.serviceRecoveryOrders+" orders\n";
@@ -587,9 +596,11 @@ function generateExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,labels){
   o+="True promotional discounts: "+fmt(totalDR.promoDisc)+" ("+pct(totalDR.promoDisc,gSales)+" of gross - this is the ONLY bucket affecting Net Revenue)\n\n";
 
   weeks.forEach((w,i)=>{
-    const c=mc.weekCalcs[i];
+    if(wFactors[i]===0)return;
+    const f=wFactors[i];
+    const c=rCalcsE[i];
     const wTargets=w.weekTargets||DEFAULT_TARGETS;
-    o+="--- "+w.label+" | "+w.dateRange+" ---\n";
+    o+="--- "+w.label+(f<1?" ("+Math.round(f*7)+"d pro-rated)":"")+" | "+w.dateRange+" ---\n";
     o+="  Gross: "+fmt(n(w.revenue.gross_sales))+" | Total Discounts: -"+fmt(n(w.revenue.discounts))+" | True Promo Discount: -"+fmt(c.truePromoDisc)+" | Refunds: -"+fmt(n(w.revenue.refunds))+" | ShipIncome: +"+fmt(n(w.revenue.shipping_income))+" | PayPal: -"+fmt(n(w.revenue.paypal_fees))+" => NET: "+fmt(c.netRevenue)+"\n";
     o+="  COGS: MfgProduct "+fmt(n(w.cogs.manufacturing_product))+" | Inbound "+fmt(n(w.cogs.manufacturing_shipping))+" | Satchels "+n(w.cogs.satchel_count)+"@$"+(w.cogs.satchel_cost_each||fixed?.satchelCostDefault||"0.85")+"="+fmt(c.satchel)+" | ServiceRecovery "+fmt(c.discReclass.serviceRecoveryCOGS)+" => TOTAL: "+fmt(c.totalCOGS)+" | GP: "+fmt(c.grossProfit)+" ("+c.grossMargin.toFixed(1)+"%)\n";
     const fLines=keys.filter(k=>k.group==="freight").map(k=>{const v=w.opex?.[k.key]!==""?n(w.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);return k.label+": "+fmt(v);});
@@ -1752,24 +1763,87 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
   const monthDateRange=weeks.length>0?weeks[0].dateRange.split(" - ")[0]+" — "+weeks[weeks.length-1].dateRange.split(" - ")[1]:"";
   const [part2,setPart2]=useState(false);
   const [sumCopied,setSumCopied]=useState(false);
+  const [rangeFrom,setRangeFrom]=useState("");
+  const [rangeTo,setRangeTo]=useState("");
+  const [useRange,setUseRange]=useState(false);
+
+  // Parse dd/mm/yy date string to Date object
+  const parseWkDate=s=>{if(!s)return null;const[d,m,y]=s.split("/");return new Date(2000+parseInt(y),parseInt(m)-1,parseInt(d));};
+
+  // Pro-rate weeks based on date range overlap
+  const getProRatedWeeks=()=>{
+    if(!useRange||!rangeFrom||!rangeTo)return{weeks,factors:weeks.map(()=>1)};
+    const from=new Date(rangeFrom),to=new Date(rangeTo);
+    to.setHours(23,59,59);
+    const factors=weeks.map(w=>{
+      const wStart=parseWkDate(w.dateRange.split(" - ")[0]);
+      const wEnd=parseWkDate(w.dateRange.split(" - ")[1]);
+      if(!wStart||!wEnd)return 1;
+      wEnd.setHours(23,59,59);
+      // No overlap
+      if(wEnd<from||wStart>to)return 0;
+      // Full overlap
+      if(wStart>=from&&wEnd<=to)return 1;
+      // Partial overlap — count overlapping days / 7
+      const overlapStart=wStart<from?from:wStart;
+      const overlapEnd=wEnd>to?to:wEnd;
+      const overlapDays=(overlapEnd-overlapStart)/(1000*60*60*24)+1;
+      return Math.min(1,Math.max(0,overlapDays/7));
+    });
+    return{weeks,factors};
+  };
+
+  const {weeks:rWeeks,factors}=getProRatedWeeks();
+
+  // Build pro-rated week calcs
+  const proRatedCalc=(wc,factor)=>({
+    netRevenue:wc.netRevenue*factor, totalCOGS:wc.totalCOGS*factor,
+    grossProfit:wc.grossProfit*factor, totalOPEX:wc.totalOPEX*factor,
+    totalWages:wc.totalWages*factor, totalFreight:wc.totalFreight*factor,
+    totalCollabs:wc.totalCollabs*factor, totalExpenses:wc.totalExpenses*factor,
+    netProfit:wc.netProfit*factor, totalDiscounts:wc.totalDiscounts*factor,
+    truePromoDisc:wc.truePromoDisc*factor,
+    grossMargin:wc.grossMargin, netMargin:wc.netMargin, // margins don't scale
+    discReclass:{
+      serviceRecoveryCOGS:(wc.discReclass?.serviceRecoveryCOGS||0)*factor,
+      serviceRecoveryOrders:Math.round((wc.discReclass?.serviceRecoveryOrders||0)*factor),
+      marketingDisc:(wc.discReclass?.marketingDisc||0)*factor,
+      staffDisc:(wc.discReclass?.staffDisc||0)*factor,
+      promoDisc:(wc.discReclass?.promoDisc||0)*factor,
+      totalDiscounts:(wc.discReclass?.totalDiscounts||0)*factor,
+    },
+  });
+
+  const rCalcs=mc.weekCalcs.map((wc,i)=>proRatedCalc(wc,factors[i]));
+  const rSum=f=>rCalcs.reduce((s,c)=>s+(c[f]||0),0);
+  const rNetRev=rSum("netRevenue"),rGrossProfit=rSum("grossProfit"),rTotalCOGS=rSum("totalCOGS");
+  const rTotalExpenses=rSum("totalExpenses"),rNetProfit=rSum("netProfit");
+  const rGrossMargin=rNetRev>0?(rGrossProfit/rNetRev)*100:0;
+  const rNetMargin=rNetRev>0?(rNetProfit/rNetRev)*100:0;
+  const rTotalFreight=rSum("totalFreight"),rTotalCollabs=rSum("totalCollabs"),rTotalWages=rSum("totalWages"),rTotalOPEX=rSum("totalOPEX");
 
   // Monthly discount reclassification totals
-  const totalDR=mc.weekCalcs.reduce((s,c)=>({
+  const totalDR=rCalcs.reduce((s,c)=>({
     serviceRecoveryCOGS:s.serviceRecoveryCOGS+(c.discReclass?.serviceRecoveryCOGS||0),
     serviceRecoveryOrders:s.serviceRecoveryOrders+(c.discReclass?.serviceRecoveryOrders||0),
     marketingDisc:s.marketingDisc+(c.discReclass?.marketingDisc||0),
     staffDisc:s.staffDisc+(c.discReclass?.staffDisc||0),
     promoDisc:s.promoDisc+(c.discReclass?.promoDisc||0),
-    totalDisc:s.totalDisc+c.totalDiscounts,
+    totalDisc:s.totalDisc+(c.totalDiscounts||0),
   }),{serviceRecoveryCOGS:0,serviceRecoveryOrders:0,marketingDisc:0,staffDisc:0,promoDisc:0,totalDisc:0});
 
+  const rangeLabel=useRange&&rangeFrom&&rangeTo?new Date(rangeFrom).toLocaleDateString("en-AU")+" to "+new Date(rangeTo).toLocaleDateString("en-AU"):null;
   const copySummary=()=>{
     const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
-    let t="## Monthly P&L Summary\n\n**Net Revenue:** "+fmt(mc.netRevenue)+"\n**Gross Profit:** "+fmt(mc.grossProfit)+" ("+mc.grossMargin.toFixed(1)+"%)\n**Total Expenses:** "+fmt(mc.totalExpenses)+"\n**Net Profit:** "+fmt(mc.netProfit)+" ("+mc.netMargin.toFixed(1)+"%)\n\n";
+    const heading=rangeLabel?"Date Range Report: "+rangeLabel:"Monthly P&L Summary";
+    let t="## "+heading+"\n\n**Net Revenue:** "+fmt(rNetRev)+"\n**Gross Profit:** "+fmt(rGrossProfit)+" ("+rGrossMargin.toFixed(1)+"%)
+**Total Expenses:** "+fmt(rTotalExpenses)+"\n**Net Profit:** "+fmt(rNetProfit)+" ("+rNetMargin.toFixed(1)+"%)
+\n";
     t+="### Discount Reclassification\n";
     t+="Service Recovery: "+fmt(totalDR.serviceRecoveryCOGS)+" | Marketing: "+fmt(totalDR.marketingDisc)+" | Staff: "+fmt(totalDR.staffDisc)+" | True Promo: "+fmt(totalDR.promoDisc)+"\n\n";
     t+="### Week Breakdown\n";
-    weeks.forEach((w,i)=>{const c=mc.weekCalcs[i];t+="**"+w.label+"** ("+w.dateRange+") - Rev: "+fmt(c.netRevenue)+" | GP: "+c.grossMargin.toFixed(1)+"% | Net: "+fmt(c.netProfit)+" ("+c.netMargin.toFixed(1)+"%)\n";});
+    weeks.forEach((w,i)=>{const c=rCalcs[i];const f=factors[i];if(f===0)return;t+="**"+w.label+(f<1?" ("+Math.round(f*7)+"d pro-rated)":"")+"** ("+w.dateRange+") - Rev: "+fmt(c.netRevenue)+" | GP: "+c.grossMargin.toFixed(1)+"% | Net: "+fmt(c.netProfit)+" ("+c.netMargin.toFixed(1)+"%)
+";});
     navigator.clipboard.writeText(t);setSumCopied(true);setTimeout(()=>setSumCopied(false),3000);
   };
 
@@ -1787,14 +1861,24 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
       {!part2&&(
         <div>
           <SH>Monthly P&L Summary</SH>
-          {monthDateRange&&<div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:16,marginTop:-8}}>{monthDateRange}</div>}
+          {/* Date range filter */}
+          <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap",marginBottom:16,padding:"12px 14px",background:S2,borderRadius:radius+1,border:"1px solid "+(useRange?A:BR)}}>
+            <div style={{fontFamily:ff,fontSize:10,color:useRange?A:MU,letterSpacing:1,textTransform:"uppercase",alignSelf:"center",minWidth:80}}>Date Range</div>
+            <div><div style={{fontFamily:ff,fontSize:9,color:MU,marginBottom:4,textTransform:"uppercase",letterSpacing:0.7}}>From</div>
+              <input type="date" value={rangeFrom} onChange={e=>{setRangeFrom(e.target.value);setUseRange(true);}} style={{background:S,border:"1px solid "+BR,color:TX,padding:"6px 10px",fontFamily:ff,fontSize:12,outline:"none",borderRadius:radius}}/></div>
+            <div><div style={{fontFamily:ff,fontSize:9,color:MU,marginBottom:4,textTransform:"uppercase",letterSpacing:0.7}}>To</div>
+              <input type="date" value={rangeTo} onChange={e=>{setRangeTo(e.target.value);setUseRange(true);}} style={{background:S,border:"1px solid "+BR,color:TX,padding:"6px 10px",fontFamily:ff,fontSize:12,outline:"none",borderRadius:radius}}/></div>
+            {useRange&&<button onClick={()=>{setUseRange(false);setRangeFrom("");setRangeTo("");}} style={{padding:"6px 12px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:10,cursor:"pointer",borderRadius:radius,alignSelf:"flex-end"}}>Clear</button>}
+            {useRange&&<div style={{fontFamily:ff,fontSize:10,color:A,alignSelf:"center"}}>{factors.filter(f=>f>0&&f<1).length} weeks pro-rated · {factors.filter(f=>f===0).length} excluded</div>}
+          </div>
+          {!useRange&&monthDateRange&&<div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:16,marginTop:-8}}>{monthDateRange}</div>}
           <Row>
-            <Badge label="Net Revenue" value={mc.netRevenue} color={A}/>
-            <Badge label="Gross Profit" value={mc.grossProfit}/>
-            <Badge label="Total Expenses" value={-mc.totalExpenses} color={RD}/>
-            <Badge label="Net Profit" value={mc.netProfit}/>
+            <Badge label="Net Revenue" value={rNetRev} color={A}/>
+            <Badge label="Gross Profit" value={rGrossProfit}/>
+            <Badge label="Total Expenses" value={-rTotalExpenses} color={RD}/>
+            <Badge label="Net Profit" value={rNetProfit}/>
           </Row>
-          <Row><Pct label="Gross Margin" value={mc.grossMargin}/><Pct label="Net Margin" value={mc.netMargin}/></Row>
+          <Row><Pct label="Gross Margin" value={rGrossMargin}/><Pct label="Net Margin" value={rNetMargin}/></Row>
 
           {/* Discount reclassification summary for the month */}
           <Accordion title="Discount Reclassification Summary" accent>
@@ -1829,9 +1913,9 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
                 ))}
               </tr></thead>
               <tbody>
-                {weeks.map((w,i)=>{const c=mc.weekCalcs[i];return(
-                  <tr key={i} style={{borderBottom:"1px solid "+BR+"22"}}>
-                    <td style={{padding:"10px",color:TX}}>{w.label}</td>
+                {weeks.map((w,i)=>{const c=rCalcs[i];const f=factors[i];if(f===0)return null;return(
+                  <tr key={i} style={{borderBottom:"1px solid "+BR+"22",opacity:f<1?0.7:1}}>
+                    <td style={{padding:"10px",color:TX}}>{w.label}{f<1&&f>0?<span style={{fontFamily:ff,fontSize:9,color:MU,marginLeft:4}}>({Math.round(f*7)}d)</span>:null}</td>
                     <td style={{padding:"10px",color:MU,fontSize:11,whiteSpace:"nowrap"}}>{w.dateRange}</td>
                     <td style={{padding:"10px",color:A,textAlign:"right"}}>{fmtD(c.netRevenue)}</td>
                     <td style={{padding:"10px",color:RD,textAlign:"right"}}>{fmtD(-c.totalCOGS)}</td>
@@ -1846,15 +1930,15 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
                 );})}
                 <tr style={{borderTop:"2px solid "+BR,background:S2}}>
                   <td style={{padding:"10px",color:A,fontWeight:"bold"}}>TOTAL</td><td/>
-                  <td style={{padding:"10px",color:A,fontWeight:"bold",textAlign:"right"}}>{fmtD(mc.netRevenue)}</td>
-                  <td style={{padding:"10px",color:RD,fontWeight:"bold",textAlign:"right"}}>{fmtD(-mc.totalCOGS)}</td>
-                  <td style={{padding:"10px",color:mc.grossProfit>=0?GR:RD,fontWeight:"bold",textAlign:"right"}}>{fmtD(mc.grossProfit)}</td>
-                  <td style={{padding:"10px",color:mc.grossMargin>=0?GR:RD,fontWeight:"bold",textAlign:"right"}}>{mc.grossMargin.toFixed(1)}%</td>
-                  <td style={{padding:"10px",color:RD,fontWeight:"bold",textAlign:"right"}}>{fmtD(-mc.totalFreight)}</td>
-                  <td style={{padding:"10px",color:RD,fontWeight:"bold",textAlign:"right"}}>{fmtD(-mc.totalWages)}</td>
-                  <td style={{padding:"10px",color:RD,fontWeight:"bold",textAlign:"right"}}>{fmtD(-mc.totalOPEX)}</td>
-                  <td style={{padding:"10px",color:mc.netProfit>=0?GR:RD,fontWeight:"bold",textAlign:"right"}}>{fmtD(mc.netProfit)}</td>
-                  <td style={{padding:"10px",color:mc.netMargin>=0?GR:RD,fontWeight:"bold",textAlign:"right"}}>{mc.netMargin.toFixed(1)}%</td>
+                  <td style={{padding:"10px",color:A,fontWeight:"bold",textAlign:"right"}}>{fmtD(rNetRev)}</td>
+                  <td style={{padding:"10px",color:RD,fontWeight:"bold",textAlign:"right"}}>{fmtD(-rTotalCOGS)}</td>
+                  <td style={{padding:"10px",color:rGrossProfit>=0?GR:RD,fontWeight:"bold",textAlign:"right"}}>{fmtD(rGrossProfit)}</td>
+                  <td style={{padding:"10px",color:rGrossMargin>=0?GR:RD,fontWeight:"bold",textAlign:"right"}}>{rGrossMargin.toFixed(1)}%</td>
+                  <td style={{padding:"10px",color:RD,fontWeight:"bold",textAlign:"right"}}>{fmtD(-rTotalFreight)}</td>
+                  <td style={{padding:"10px",color:RD,fontWeight:"bold",textAlign:"right"}}>{fmtD(-rTotalWages)}</td>
+                  <td style={{padding:"10px",color:RD,fontWeight:"bold",textAlign:"right"}}>{fmtD(-rTotalOPEX)}</td>
+                  <td style={{padding:"10px",color:rNetProfit>=0?GR:RD,fontWeight:"bold",textAlign:"right"}}>{fmtD(rNetProfit)}</td>
+                  <td style={{padding:"10px",color:rNetMargin>=0?GR:RD,fontWeight:"bold",textAlign:"right"}}>{rNetMargin.toFixed(1)}%</td>
                 </tr>
               </tbody>
             </table>
@@ -1865,16 +1949,16 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
             <div key={lbl} style={{marginBottom:10}}>
               <div style={{display:"flex",justifyContent:"space-between",fontFamily:ff,fontSize:12,marginBottom:4}}>
                 <span style={{color:TX}}>{lbl}</span>
-                <span style={{color:RD}}>{fmtD(-val)} ({mc.totalExpenses>0?((val/mc.totalExpenses)*100).toFixed(1):0}%)</span>
+                <span style={{color:RD}}>{fmtD(-val)} ({rTotalExpenses>0?((val/rTotalExpenses)*100).toFixed(1):0}%)</span>
               </div>
               <div style={{background:S2,borderRadius:3,height:7,overflow:"hidden"}}>
-                <div style={{background:col,height:"100%",width:(mc.totalExpenses>0?Math.min((val/mc.totalExpenses)*100,100):0)+"%",borderRadius:3}}/>
+                <div style={{background:col,height:"100%",width:(rTotalExpenses>0?Math.min((val/rTotalExpenses)*100,100):0)+"%",borderRadius:3}}/>
               </div>
             </div>
           ))}
 
           <div style={{display:"flex",gap:10,marginTop:24}}>
-            <button onClick={onExport}
+            <button onClick={()=>onExport(weeks,extras,rangeLabel,factors)}
               style={{flex:1,padding:"13px 0",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
               <div><E value={labels.btn_monthly_export} onSave={v=>labels._save("btn_monthly_export",v)} style={{color:A,fontFamily:ff,fontSize:12}}/>{copied?" - Copied!":""}</div>
               <div style={{fontSize:9,color:MU,marginTop:2}}><E value={labels.btn_monthly_export_sub} onSave={v=>labels._save("btn_monthly_export_sub",v)} style={{color:MU,fontFamily:ff,fontSize:9}}/></div>
@@ -2678,7 +2762,7 @@ export default function App(){
     autoSave(monthData,fixed,ns);
   };
 
-  const handleExport=(weeksData=curWeeks,extras=curExtras,label=selMonth?.label)=>{
+  const handleExport=(weeksData=curWeeks,extras=curExtras,label=selMonth?.label,factors=null)=>{
     navigator.clipboard.writeText(generateExport(weeksData,fixed,extras,label,opexKeys,wageDepts,staff,labels));
     setCopied(true);setTimeout(()=>setCopied(false),3000);
   };
@@ -2796,7 +2880,7 @@ export default function App(){
 
           {tab==="overview"&&!loading&&(
             <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+4,padding:"24px 28px"}}>
-              <MonthlyOverview weeks={curWeeks} fixed={fixed} extras={curExtras} onExtrasChange={updateExtras} onExport={()=>handleExport()} copied={copied} opexKeys={opexKeys} depts={wageDepts} labels={labels} monthKey={curKey}/>
+              <MonthlyOverview weeks={curWeeks} fixed={fixed} extras={curExtras} onExtrasChange={updateExtras} onExport={(w,e,rl,f)=>handleExport(w,e,rl||selMonth?.label,f)} copied={copied} opexKeys={opexKeys} depts={wageDepts} labels={labels} monthKey={curKey}/>
             </div>
           )}
 
