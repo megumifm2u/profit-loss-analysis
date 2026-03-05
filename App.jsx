@@ -2641,7 +2641,7 @@ export default function App(){
     </ThemeContext.Provider>
   );
 
-  const {A,BG,S,S2,BR,TX,MU,ff,ffTitle,radius,GR,RD,szHeaderTitle,szHeaderBrand}=theme;
+  const {A,OA,BG,S,S2,BR,TX,MU,ff,ffTitle,radius,GR,RD,szHeaderTitle,szHeaderBrand}=theme;
 
   const TABS=[
     {id:"input",key:"tab_input"},{id:"overview",key:"tab_overview"},{id:"visualise",key:"tab_visualise"},
