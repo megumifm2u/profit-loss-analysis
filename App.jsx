@@ -1079,6 +1079,178 @@ function ShopifyImport({week,onChange,labels}){
 }
 
 // ─── Product Margin Import ────────────────────────────────────────────────────
+function MetricsGuide({target}){
+  const {S2,S,BR,A,MU,TX,ff,GR,RD,radius}=useTheme();
+  const [open,setOpen]=useState(false);
+  const [activeMetric,setActiveMetric]=useState(null);
+
+  const metrics=[
+    {
+      id:"actualMargin",
+      name:"Actual GM %",
+      col:"Actual GM",
+      color:GR,
+      what:"The real gross margin you achieved after all discounts and returns. Calculated as (Net Sales − COGS) ÷ Net Sales.",
+      good:`Above ${target}% — your target. The higher, the more room you have to cover operating costs.`,
+      bad:`Below ${target}% — you're not generating enough gross profit per product to sustain the business after wages, freight, and OPEX.`,
+      action:"If consistently below target: raise the retail price, reduce the COGS, or stop running discounts on this product.",
+    },
+    {
+      id:"modelledMargin",
+      name:"Model GM %",
+      col:"Model GM",
+      color:"#7dd3fc",
+      what:"What the margin should be based on your Product Catalogue inputs — COGS, pick & pack, shipping, and tariffs. This is your theoretical margin at full retail price with no discounts.",
+      good:"Close to or above your target margin at full price.",
+      bad:"If Modelled GM is already below target at full price, the product's cost structure is broken — no discount should ever be run on it.",
+      action:"Use this as your pricing floor. If Model GM < target, you need to either raise retail price or reduce manufacturing/shipping costs.",
+    },
+    {
+      id:"variance",
+      name:"Variance",
+      col:"Variance",
+      color:"#f59e0b",
+      what:"Actual GM minus Modelled GM. Shows how much real-world performance deviated from what the numbers predicted.",
+      good:"Close to 0% — your model is accurate and discounts/returns are under control.",
+      bad:"Large negative variance means discounts, returns, or a different sales mix than expected ate into margin. Large positive variance is rare but means you sold more full-price than assumed.",
+      action:"If variance is consistently -5% or worse on a product, investigate: is it always discounted? High return rate? Selling primarily in a lower-margin market?",
+    },
+    {
+      id:"contribMargin",
+      name:"Contrib GM %",
+      col:"Contrib GM",
+      color:GR,
+      what:"Contribution margin — what percentage of each revenue dollar is left after all variable costs (COGS + pick & pack + shipping + tariffs). This is what actually contributes to covering your fixed costs.",
+      good:`Above ${target}% — each sale is meaningfully contributing to overhead and profit.`,
+      bad:"Low contribution margin means fixed costs will eat you alive at scale. Even if you sell a lot, you'll barely cover rent, wages, and OPEX.",
+      action:"Contribution margin is the most important metric for deciding whether to scale a product. Only scale products with healthy contribution margins.",
+    },
+    {
+      id:"breakEven",
+      name:"Break-even Price",
+      col:"Break-even",
+      color:"#c4b5fd",
+      what:`The minimum retail price at which this product hits your target margin of ${target}%, after all variable costs. Calculated as: Variable Cost ÷ (1 − Target Margin%).`,
+      good:"Your current retail price is comfortably above this number.",
+      bad:"Your retail price is at or below break-even — you are subsidising every sale.",
+      action:"Never run a discount that brings the effective sale price below break-even. This number is the absolute floor for any promotion.",
+    },
+    {
+      id:"varCost",
+      name:"Variable Cost",
+      col:"Var Cost",
+      color:MU,
+      what:"The total cost per unit to produce and deliver the product: COGS + pick & pack + weighted average outbound shipping + US tariff (if applicable). Pulled from your Product Catalogue.",
+      good:"Low relative to retail price — wide margin to work with.",
+      bad:"High variable cost squeezes margin and limits how aggressively you can discount.",
+      action:"Review your Product Catalogue entries. If variable cost seems too high, check whether your pick & pack estimate or shipping assumptions are accurate.",
+    },
+    {
+      id:"discRate",
+      name:"Disc %",
+      col:"Disc %",
+      color:RD,
+      what:"The percentage of gross sales that was given away as discounts on this product. Calculated as Total Discounts ÷ Gross Sales.",
+      good:"Under 10% — healthy promotional activity that doesn't meaningfully erode margin.",
+      bad:"Over 20% — you're training customers to wait for sales and destroying the perceived value of the product.",
+      action:"For products with high discount rates and low actual margin, stop the promotion or replace it with a smaller discount. Check which specific discount codes are hitting this product.",
+    },
+    {
+      id:"discLevels",
+      name:"@10% / @15% / @20% / @25% disc",
+      col:"Discount columns",
+      color:"#f59e0b",
+      what:"Shows what the gross margin would be at each discount level, based on your average retail price and variable costs. Green = above your product target. Red = below.",
+      good:"Most columns are green — you have flexibility to run promotions without destroying margin.",
+      bad:"Even the 10% column is red — this product cannot sustain any discount without going below target.",
+      action:"Before running any promotion, check these columns. If @20% is red, don't put this product in a 20% off sale. Use the highest green column as your maximum discount level.",
+    },
+    {
+      id:"status",
+      name:"Status",
+      col:"Status",
+      color:MU,
+      what:"A quick health flag for the product. OK = at or above target margin. LOW = below target margin but still generating some revenue. GIFTED = 100% discounted, zero net sales, full COGS unrecovered.",
+      good:"OK across the board.",
+      bad:"GIFTED is the worst outcome — you gave the product away entirely and still paid manufacturing costs. LOW means discounts or cost structure are breaking the economics.",
+      action:"GIFTED products should be reviewed for whether they're marketing investments (collabs, PR) or mistakes. LOW products need a pricing or discount strategy fix.",
+    },
+  ];
+
+  return(
+    <div style={{borderTop:"1px solid "+BR+"44"}}>
+      {/* Toggle header */}
+      <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",cursor:"pointer",userSelect:"none",background:S2}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontFamily:ff,fontSize:10,color:open?A:MU,letterSpacing:1.5,textTransform:"uppercase"}}>4 — Metrics Guide</span>
+          <span style={{fontFamily:ff,fontSize:9,color:MU}}>what each column means and what to do with it</span>
+        </div>
+        <span style={{fontFamily:ff,fontSize:10,color:MU}}>{open?"▲":"▼"}</span>
+      </div>
+
+      {open&&(
+        <div style={{padding:"0 16px 20px",background:S2}}>
+          {/* Metric selector */}
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16,paddingTop:4}}>
+            {metrics.map(m=>(
+              <button key={m.id} onClick={()=>setActiveMetric(activeMetric===m.id?null:m.id)}
+                style={{padding:"5px 12px",background:activeMetric===m.id?m.color+"22":"transparent",border:"1px solid "+(activeMetric===m.id?m.color:BR),color:activeMetric===m.id?m.color:MU,fontFamily:ff,fontSize:10,cursor:"pointer",borderRadius:radius,letterSpacing:0.5,transition:"all 0.15s"}}>
+                {m.name}
+              </button>
+            ))}
+          </div>
+
+          {/* Show all if none selected */}
+          {!activeMetric&&(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:10}}>
+              {metrics.map(m=>(
+                <div key={m.id} onClick={()=>setActiveMetric(m.id)}
+                  style={{background:S,border:"1px solid "+BR+"66",borderRadius:radius+1,padding:"12px 14px",cursor:"pointer",transition:"border-color 0.15s",borderLeft:"3px solid "+m.color}}
+                  onMouseEnter={e=>e.currentTarget.style.borderColor=m.color}
+                  onMouseLeave={e=>e.currentTarget.style.borderColor=BR+"66"}>
+                  <div style={{fontFamily:ff,fontSize:11,color:TX,fontWeight:"bold",marginBottom:4}}>{m.name}</div>
+                  <div style={{fontFamily:ff,fontSize:10,color:MU,lineHeight:1.6,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{m.what}</div>
+                  <div style={{fontFamily:ff,fontSize:9,color:m.color,marginTop:6,letterSpacing:0.5}}>Click to expand →</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Expanded metric detail */}
+          {activeMetric&&(()=>{
+            const m=metrics.find(x=>x.id===activeMetric);
+            if(!m)return null;
+            return(
+              <div style={{background:S,border:"1px solid "+m.color+"44",borderRadius:radius+2,padding:"20px 22px",borderLeft:"4px solid "+m.color}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+                  <div>
+                    <div style={{fontFamily:ff,fontSize:14,color:TX,fontWeight:"bold",marginBottom:2}}>{m.name}</div>
+                    <div style={{fontFamily:ff,fontSize:9,color:MU,letterSpacing:0.7,textTransform:"uppercase"}}>Column: {m.col}</div>
+                  </div>
+                  <button onClick={()=>setActiveMetric(null)} style={{background:"transparent",border:"none",color:MU,fontFamily:ff,fontSize:16,cursor:"pointer",padding:"0 4px",lineHeight:1}}>✕</button>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr",gap:12}}>
+                  {[
+                    {label:"What it is",text:m.what,color:A},
+                    {label:"✓ Healthy",text:m.good,color:GR},
+                    {label:"✗ Warning sign",text:m.bad,color:RD},
+                    {label:"→ What to do",text:m.action,color:"#f59e0b"},
+                  ].map(({label,text,color})=>(
+                    <div key={label} style={{padding:"10px 14px",background:S2,borderRadius:radius,borderLeft:"2px solid "+color+"66"}}>
+                      <div style={{fontFamily:ff,fontSize:9,color:color,letterSpacing:1,textTransform:"uppercase",marginBottom:5}}>{label}</div>
+                      <div style={{fontFamily:ff,fontSize:12,color:TX,lineHeight:1.7}}>{text}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targetMargin,fullPage}){
   const {S2,BR,A,S,TX,ff,MU,GR,RD,radius}=useTheme();
   const [raw,setRaw]=useState("");
@@ -1097,7 +1269,7 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
   const [editingColName,setEditingColName]=useState(null);
   const [dragCol,setDragCol]=useState(null);
   const [dragOver,setDragOver]=useState(null);
-  const [showExport,setShowExport]=useState(false);
+  const [showExport,setShowExport]=useState(false); // kept for potential future use
   const resizeRef=useRef({});
   const target=targetMargin||55;
   const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -1448,20 +1620,6 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                 </button>
                 {Object.values(filters).some(v=>v)&&<button onClick={()=>setFilters({})} style={{padding:"4px 10px",background:"transparent",border:"1px solid "+BR,color:RD,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius}}>Clear filters</button>}
                 <button onClick={()=>setColOrder(null)} title="Reset column order" style={{padding:"4px 10px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>Reset cols</button>
-                {/* Export */}
-                <div style={{position:"relative"}}>
-                  <button onClick={()=>setShowExport(e=>!e)} style={{padding:"4px 12px",background:showExport?A:"transparent",border:"1px solid "+(showExport?A:BR),color:showExport?"#fff":MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>Export ▾</button>
-                  {showExport&&(
-                    <div style={{position:"absolute",right:0,top:"110%",background:S2,border:"1px solid "+BR,borderRadius:radius,zIndex:100,minWidth:180,boxShadow:"0 8px 24px #00000066"}}>
-                      <button onClick={()=>{exportCSV();setShowExport(false);}} style={{display:"block",width:"100%",padding:"10px 16px",background:"transparent",border:"none",color:TX,fontFamily:ff,fontSize:11,cursor:"pointer",textAlign:"left"}}>
-                        ↓ Download CSV
-                      </button>
-                      <button onClick={()=>{exportText();setShowExport(false);}} style={{display:"block",width:"100%",padding:"10px 16px",background:"transparent",border:"none",color:A,fontFamily:ff,fontSize:11,cursor:"pointer",textAlign:"left",borderTop:"1px solid "+BR+"44"}}>
-                        ✦ Copy for Claude analysis
-                      </button>
-                    </div>
-                  )}
-                </div>
                 {msg&&<span style={{fontFamily:ff,fontSize:11,color:GR}}>{msg}</span>}
               </div>
 
@@ -1578,6 +1736,28 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
               <div style={{padding:"6px 16px 10px",fontFamily:ff,fontSize:9,color:MU}}>
                 Sort: click column header · Rename: double-click header · Resize: drag right edge · Reorder: drag column · Filter: use Filters button
               </div>
+            </div>
+          )}
+
+          {/* ── SECTION 4: Metrics Guide ── */}
+          {list.length>0&&<MetricsGuide target={target}/>}
+
+          {/* ── Export Buttons ── */}
+          {list.length>0&&(
+            <div style={{display:"flex",gap:12,padding:"20px 16px",borderTop:"1px solid "+BR+"44",background:S2}}>
+              <button onClick={exportCSV}
+                style={{flex:1,padding:"14px 0",background:"transparent",border:"1px solid "+BR,color:TX,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+                <span style={{fontSize:18,lineHeight:1}}>↓</span>
+                <span>Download CSV</span>
+                <span style={{fontSize:9,color:MU,letterSpacing:0.5,textTransform:"none"}}>current view, filtered &amp; sorted</span>
+              </button>
+              <button onClick={exportText}
+                style={{flex:1,padding:"14px 0",background:A+"11",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+                <span style={{fontSize:18,lineHeight:1}}>✦</span>
+                <span>Copy for Claude</span>
+                <span style={{fontSize:9,color:MU,letterSpacing:0.5,textTransform:"none"}}>full margin analysis + prompt</span>
+              </button>
+              {msg&&<span style={{fontFamily:ff,fontSize:11,color:GR,alignSelf:"center"}}>{msg}</span>}
             </div>
           )}
         </div>
