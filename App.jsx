@@ -1085,69 +1085,268 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
   const [msg,setMsg]=useState("");
   const [open,setOpen]=useState(!!fullPage);
   const [showPaste,setShowPaste]=useState(false);
+  const [editCat,setEditCat]=useState(null);
   const [expandedProduct,setExpandedProduct]=useState(null);
-  const [editCat,setEditCat]=useState(null); // product key being edited in catalogue
+  const [sortCol,setSortCol]=useState("netSales");
+  const [sortDir,setSortDir]=useState("desc");
+  const [filters,setFilters]=useState({});
+  const [showFilters,setShowFilters]=useState(false);
+  const [colWidths,setColWidths]=useState({});
+  const [colOrder,setColOrder]=useState(null);
+  const [colNames,setColNames]=useState({});
+  const [editingColName,setEditingColName]=useState(null);
+  const [dragCol,setDragCol]=useState(null);
+  const [dragOver,setDragOver]=useState(null);
+  const [showExport,setShowExport]=useState(false);
+  const resizeRef=useRef({});
   const target=targetMargin||55;
   const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
   const pct=v=>v.toFixed(1)+"%";
-
   const list=products||[];
   const cat=catalogue||{};
 
+  // Default columns definition
+  const DEFAULT_COLS=[
+    {id:"product",label:"Product",width:180,sortable:true,filterable:true},
+    {id:"units",label:"Units",width:58,sortable:true},
+    {id:"gross",label:"Gross",width:84,sortable:true},
+    {id:"discRate",label:"Disc %",width:62,sortable:true},
+    {id:"netSales",label:"Net Sales",width:90,sortable:true},
+    {id:"totalCogs",label:"COGS",width:80,sortable:true},
+    {id:"grossProfit",label:"Gross Profit",width:90,sortable:true},
+    {id:"actualMargin",label:"Actual GM",width:76,sortable:true},
+    {id:"modelledMargin",label:"Model GM",width:76,sortable:true},
+    {id:"variance",label:"Variance",width:70,sortable:true},
+    {id:"contribMargin",label:"Contrib GM",width:80,sortable:true},
+    {id:"breakEven",label:"Break-even",width:84,sortable:true},
+    {id:"varCost",label:"Var Cost",width:76,sortable:true},
+    {id:"disc10",label:"@10% disc",width:72,sortable:true},
+    {id:"disc15",label:"@15% disc",width:72,sortable:true},
+    {id:"disc20",label:"@20% disc",width:72,sortable:true},
+    {id:"disc25",label:"@25% disc",width:72,sortable:true},
+    {id:"status",label:"Status",width:64,sortable:true,filterable:true},
+  ];
+
+  const activeCols=useMemo(()=>{
+    const order=colOrder||DEFAULT_COLS.map(c=>c.id);
+    return order.map(id=>DEFAULT_COLS.find(c=>c.id===id)).filter(Boolean);
+  },[colOrder]);
+
+  const getColLabel=id=>colNames[id]||DEFAULT_COLS.find(c=>c.id===id)?.label||id;
+  const getColWidth=id=>colWidths[id]||(DEFAULT_COLS.find(c=>c.id===id)?.width||90);
+
+  const catEntry=name=>cat[name]||{pickPack:0,packagingType:"satchel",tariffPct:0,targetMarginPct:target,shippingAU:8,shippingUS:18,shippingIntl:22};
+  const saveCat=(name,field,val)=>onCatalogueUpdate({...cat,[name]:{...catEntry(name),[field]:val}});
+
+  const calcProduct=p=>{
+    const c=catEntry(p.product);
+    const avgRetail=p.units>0?p.gross/p.units:0;
+    const cogsUnit=p.avgCogsUnit||0;
+    const avgShipping=c.shippingAU*0.7+c.shippingUS*0.2+c.shippingIntl*0.1;
+    const varCostUnit=cogsUnit+c.pickPack+avgShipping+(cogsUnit*(c.tariffPct/100));
+    const contribMargin=avgRetail>0?((avgRetail-varCostUnit)/avgRetail)*100:0;
+    const breakEven=varCostUnit>0&&c.targetMarginPct<100?varCostUnit/(1-(c.targetMarginPct/100)):0;
+    const modelledMargin=avgRetail>0?((avgRetail-varCostUnit)/avgRetail)*100:0;
+    const actualMargin=p.marginPct;
+    const variance=actualMargin-modelledMargin;
+    const discLevels=[10,15,20,25].map(d=>{
+      const dp=avgRetail*(1-d/100);
+      const m=dp>0?((dp-varCostUnit)/dp)*100:0;
+      return{disc:d,margin:m,viable:m>=c.targetMarginPct};
+    });
+    return{cogsUnit,varCostUnit,avgRetail,contribMargin,breakEven,modelledMargin,actualMargin,variance,discLevels,productTarget:c.targetMarginPct};
+  };
+
+  // Enrich list with calcs
+  const enriched=useMemo(()=>list.map(p=>{
+    const r=calcProduct(p);
+    const st=p.netSales<=0&&p.gross>0?"GIFTED":p.marginPct<r.productTarget?"LOW":"OK";
+    return{...p,...r,status:st};
+  }),[list,cat,target]);
+
+  // Filter
+  const filtered=useMemo(()=>{
+    let rows=[...enriched];
+    Object.entries(filters).forEach(([col,val])=>{
+      if(!val)return;
+      const v=val.toLowerCase();
+      rows=rows.filter(r=>{
+        const cell=String(r[col]||"").toLowerCase();
+        return cell.includes(v);
+      });
+    });
+    return rows;
+  },[enriched,filters]);
+
+  // Sort
+  const sorted=useMemo(()=>{
+    const rows=[...filtered];
+    rows.sort((a,b)=>{
+      let av=a[sortCol],bv=b[sortCol];
+      if(typeof av==="string")av=av.toLowerCase();
+      if(typeof bv==="string")bv=bv.toLowerCase();
+      if(av<bv)return sortDir==="asc"?-1:1;
+      if(av>bv)return sortDir==="asc"?1:-1;
+      return 0;
+    });
+    return rows;
+  },[filtered,sortCol,sortDir]);
+
+  const totalNet=enriched.reduce((s,p)=>s+p.netSales,0);
+  const totalGP=enriched.reduce((s,p)=>s+p.grossProfit,0);
+  const blended=totalNet>0?(totalGP/totalNet)*100:0;
+  const flagCount=enriched.filter(p=>p.status!=="OK").length;
+
   function applyPaste(){
     const parsed=parseProductMargin(raw);
-    if(!parsed.length){setMsg("No data detected — check format");return;}
-    // Merge with existing products
+    if(!parsed.length){setMsg("No data detected");return;}
     const existing={};
     list.forEach(p=>{existing[p.product]=p;});
     parsed.forEach(p=>{existing[p.product]=p;});
     onUpdate(Object.values(existing));
-    setRaw(""); setShowPaste(false);
+    setRaw("");setShowPaste(false);
     setMsg("Loaded "+parsed.length+" products");
     setTimeout(()=>setMsg(""),3000);
   }
 
-  // Per-product catalogue entry helper
-  const catEntry=name=>cat[name]||{pickPack:0,packagingType:"satchel",tariffPct:0,targetMarginPct:target,shippingAU:8,shippingUS:18,shippingIntl:22};
-  const saveCat=(name,field,val)=>{
-    const updated={...cat,[name]:{...catEntry(name),[field]:val}};
-    onCatalogueUpdate(updated);
-  };
+  // Column resize
+  function startResize(e,colId){
+    e.preventDefault();
+    const startX=e.clientX;
+    const startW=getColWidth(colId);
+    const onMove=ev=>setColWidths(w=>({...w,[colId]:Math.max(50,startW+ev.clientX-startX)}));
+    const onUp=()=>{document.removeEventListener("mousemove",onMove);document.removeEventListener("mouseup",onUp);};
+    document.addEventListener("mousemove",onMove);
+    document.addEventListener("mouseup",onUp);
+  }
 
-  // Auto-calculations per product
-  const calcProduct=(p)=>{
-    const c=catEntry(p.product);
-    const avgRetail=p.units>0?p.gross/p.units:0;
-    const cogsUnit=p.avgCogsUnit||0;
-    // Weighted avg shipping (assume mostly AU for now — user can refine in catalogue)
-    const avgShipping=(c.shippingAU*0.7+c.shippingUS*0.2+c.shippingIntl*0.1);
-    const varCostUnit=cogsUnit+c.pickPack+avgShipping+(cogsUnit*(c.tariffPct/100));
-    const contributionMargin=avgRetail>0?((avgRetail-varCostUnit)/avgRetail)*100:0;
-    const breakEven=varCostUnit>0?varCostUnit/(1-(c.targetMarginPct/100)):0;
-    const discountLevels=[10,15,20,25,30].map(d=>{
-      const discPrice=avgRetail*(1-d/100);
-      const margin=discPrice>0?((discPrice-varCostUnit)/discPrice)*100:0;
-      return{disc:d,price:discPrice,margin,viable:margin>=c.targetMarginPct};
+  // Column drag-reorder
+  function onDragStart(e,id){setDragCol(id);e.dataTransfer.effectAllowed="move";}
+  function onDragOver(e,id){e.preventDefault();setDragOver(id);}
+  function onDrop(e,id){
+    e.preventDefault();
+    if(!dragCol||dragCol===id)return;
+    const order=colOrder||DEFAULT_COLS.map(c=>c.id);
+    const from=order.indexOf(dragCol),to=order.indexOf(id);
+    if(from<0||to<0)return;
+    const next=[...order];next.splice(from,1);next.splice(to,0,dragCol);
+    setColOrder(next);setDragCol(null);setDragOver(null);
+  }
+
+  // Sort toggle
+  function toggleSort(id){
+    if(sortCol===id)setSortDir(d=>d==="asc"?"desc":"asc");
+    else{setSortCol(id);setSortDir("desc");}
+  }
+
+  // Cell value getter
+  function getCellVal(row,colId){
+    switch(colId){
+      case"product":return row.product;
+      case"units":return row.units;
+      case"gross":return fmt(row.gross);
+      case"discRate":return pct(row.discRate);
+      case"netSales":return fmt(row.netSales);
+      case"totalCogs":return fmt(row.totalCogs);
+      case"grossProfit":return fmt(row.grossProfit);
+      case"actualMargin":return row.netSales>0?pct(row.actualMargin):"GIFTED";
+      case"modelledMargin":return row.avgRetail>0?pct(row.modelledMargin):"—";
+      case"variance":return row.avgRetail>0?(row.variance>=0?"+":"")+row.variance.toFixed(1)+"%":"—";
+      case"contribMargin":return row.avgRetail>0?pct(row.contribMargin):"—";
+      case"breakEven":return row.breakEven>0?fmt(row.breakEven):"—";
+      case"varCost":return row.varCostUnit>0?fmt(row.varCostUnit):"—";
+      case"disc10":return row.avgRetail>0?pct(row.discLevels[0]?.margin||0):"—";
+      case"disc15":return row.avgRetail>0?pct(row.discLevels[1]?.margin||0):"—";
+      case"disc20":return row.avgRetail>0?pct(row.discLevels[2]?.margin||0):"—";
+      case"disc25":return row.avgRetail>0?pct(row.discLevels[3]?.margin||0):"—";
+      case"status":return row.status;
+      default:return"—";
+    }
+  }
+
+  // Cell color
+  function getCellColor(row,colId){
+    const pt=row.productTarget||target;
+    switch(colId){
+      case"actualMargin":return row.netSales>0?(row.actualMargin>=pt?GR:RD):RD;
+      case"modelledMargin":return row.avgRetail>0?(row.modelledMargin>=pt?GR:RD):MU;
+      case"variance":return row.avgRetail>0?(Math.abs(row.variance)>5?RD:MU):MU;
+      case"contribMargin":return row.avgRetail>0?(row.contribMargin>=pt?GR:RD):MU;
+      case"discRate":return row.discRate>20?RD:MU;
+      case"grossProfit":return row.grossProfit>=0?GR:RD;
+      case"disc10":return row.discLevels[0]?.viable?GR:RD;
+      case"disc15":return row.discLevels[1]?.viable?GR:RD;
+      case"disc20":return row.discLevels[2]?.viable?GR:RD;
+      case"disc25":return row.discLevels[3]?.viable?GR:RD;
+      case"status":return row.status==="OK"?GR:row.status==="GIFTED"?RD:"#f59e0b";
+      case"netSales":return A;
+      default:return TX;
+    }
+  }
+
+  // Export to CSV
+  function exportCSV(){
+    const headers=activeCols.map(c=>getColLabel(c.id));
+    const rows=sorted.map(row=>activeCols.map(c=>{
+      const v=getCellVal(row,c.id);
+      return typeof v==="string"&&v.includes(",")?"\""+v+"\"":v;
+    }));
+    const csv=[headers,...rows].map(r=>r.join(",")).join("\n");
+    const blob=new Blob([csv],{type:"text/csv"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");a.href=url;a.download="margin-analysis.csv";a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Export to Claude-ready text
+  function exportText(){
+    const fmtN=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
+    let t="=== PRODUCT MARGIN ANALYSIS ===\n";
+    t+="Generated: "+new Date().toLocaleDateString("en-AU")+"\n";
+    t+="Products: "+enriched.length+" | Blended GM: "+blended.toFixed(1)+"% | Target: "+target+"%\n";
+    t+="Total Net Sales: "+fmtN(totalNet)+" | Total GP: "+fmtN(totalGP)+"\n\n";
+    const below=enriched.filter(p=>p.status==="LOW");
+    const gifted=enriched.filter(p=>p.status==="GIFTED");
+    if(gifted.length){
+      t+="--- FULLY GIFTED (100% discounted, unrecovered COGS) ---\n";
+      gifted.forEach(p=>{t+="  "+p.product+": "+p.units+"u | Gross "+fmtN(p.gross)+" | COGS unrecovered "+fmtN(p.totalCogs)+"\n";});
+      t+="\n";
+    }
+    if(below.length){
+      t+="--- BELOW TARGET MARGIN ("+target+"%) ---\n";
+      below.forEach(p=>{
+        const r=calcProduct(p);
+        t+="  "+p.product+": actual "+p.marginPct.toFixed(1)+"% vs model "+r.modelledMargin.toFixed(1)+"% | disc rate "+p.discRate.toFixed(1)+"% | break-even "+fmtN(r.breakEven)+"\n";
+        t+="    Discount viability: "+r.discLevels.map(d=>"@"+d.disc+"% → "+d.margin.toFixed(1)+"%"+(d.viable?" ✓":" ✗")).join(" | ")+"\n";
+      });
+      t+="\n";
+    }
+    t+="--- ALL PRODUCTS ---\n";
+    sorted.forEach(p=>{
+      const r=calcProduct(p);
+      t+="  "+p.product+" ["+p.status+"]: "+p.units+"u | Net "+fmtN(p.netSales)+" | Actual GM "+p.marginPct.toFixed(1)+"% | Model "+r.modelledMargin.toFixed(1)+"% | Var "+((r.variance>=0?"+":"")+r.variance.toFixed(1))+"%\n";
+      t+="    Var cost: "+fmtN(r.varCostUnit)+" | Break-even: "+fmtN(r.breakEven)+" | Disc: 10%→"+r.discLevels[0].margin.toFixed(1)+"% 15%→"+r.discLevels[1].margin.toFixed(1)+"% 20%→"+r.discLevels[2].margin.toFixed(1)+"% 25%→"+r.discLevels[3].margin.toFixed(1)+"%\n";
     });
-    const modelledMargin=avgRetail>0?((avgRetail-varCostUnit)/avgRetail)*100:0;
-    const actualMargin=p.marginPct;
-    const variance=actualMargin-modelledMargin;
-    return{cogsUnit,varCostUnit,avgRetail,contributionMargin,breakEven,discountLevels,modelledMargin,actualMargin,variance,c};
-  };
-
-  // Summary
-  const totalNet=list.reduce((s,p)=>s+p.netSales,0);
-  const totalGP=list.reduce((s,p)=>s+p.grossProfit,0);
-  const blended=totalNet>0?(totalGP/totalNet)*100:0;
-  const belowTarget=list.filter(p=>p.netSales>0&&p.marginPct<target);
-  const zeroed=list.filter(p=>p.netSales<=0&&p.gross>0);
-  const flagCount=belowTarget.length+zeroed.length;
+    t+="\n=== END MARGIN DATA ===\n\n";
+    t+="You are a senior pricing strategist. Analyse the above product margin data and provide:\n";
+    t+="1. MARGIN HEALTH — Which products are structurally profitable vs marginal vs loss-making? What is the weighted blended margin telling you?\n";
+    t+="2. DISCOUNT DAMAGE — For each discounted product, at what discount level does margin become unviable? Name the products and the thresholds.\n";
+    t+="3. GIFTED PRODUCTS — What is the total unrecovered COGS from fully gifted products? Is this a marketing cost or a process failure?\n";
+    t+="4. PRICING RECOMMENDATIONS — Which products need a retail price increase to hit target margin? By how much? Give exact dollar amounts.\n";
+    t+="5. VARIANCE ANALYSIS — Where actual GM deviates from modelled GM by more than 5%, diagnose why (returns, discount mix, channel mix).\n";
+    t+="6. TOP 3 ACTIONS — Exact dollar impact, mechanism, and timeline for each.\n\nUse exact figures. Be specific. Make it actionable.";
+    navigator.clipboard.writeText(t);
+    setMsg("Copied to clipboard — paste into Claude");
+    setTimeout(()=>setMsg(""),4000);
+  }
 
   const inp={background:S,border:"1px solid "+BR,color:TX,padding:"5px 8px",fontFamily:ff,fontSize:11,outline:"none",borderRadius:radius,width:"100%",boxSizing:"border-box"};
+  const thStyle={fontFamily:ff,fontSize:8,color:MU,fontWeight:"normal",letterSpacing:0.8,textTransform:"uppercase",whiteSpace:"nowrap",position:"relative",userSelect:"none",padding:"6px 8px 6px 6px",borderBottom:"2px solid "+BR,background:S2};
+  const tdStyle={padding:"6px 8px",fontFamily:ff,fontSize:11,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"};
 
   return(
     <div style={{marginBottom:16}}>
-      {/* Collapsible header (only when not fullPage) */}
+      {/* Collapsible header */}
       {!fullPage&&(
         <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 14px",background:S2,border:"1px solid "+(open?A:BR),borderRadius:open?"6px 6px 0 0":"6px",cursor:"pointer",userSelect:"none"}}>
           <span style={{fontFamily:ff,fontSize:10,color:open?A:MU,letterSpacing:2,textTransform:"uppercase"}}>Product Margin</span>
@@ -1159,26 +1358,24 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
       )}
 
       {(open||fullPage)&&(
-        <div style={{border:fullPage?"none":"1px solid "+BR,borderTop:"none",borderRadius:fullPage?0:"0 0 6px 6px",background:fullPage?"transparent":S2}}>
+        <div style={{border:fullPage?"none":"1px solid "+BR,borderTop:"none",borderRadius:fullPage?0:"0 0 6px 6px"}}>
 
-          {/* ── SECTION 1: Paste from Shopify ── */}
-          <div style={{padding:fullPage?"0 0 20px":"14px 16px 0",borderBottom:"1px solid "+BR+"44",marginBottom:16}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-              <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase"}}>1 — Shopify Data</div>
-              <button onClick={()=>setShowPaste(s=>!s)}
-                style={{padding:"4px 12px",background:showPaste?A:"transparent",border:"1px solid "+(showPaste?A:BR),color:showPaste?"#fff":MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
-                {list.length?"Update":"Paste Data"}
-              </button>
+          {/* ── SECTION 1: Shopify paste ── */}
+          <div style={{padding:"14px 16px",borderBottom:"1px solid "+BR+"44",background:S2}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showPaste?10:0}}>
+              <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase"}}>
+                1 — Shopify Data
+                {list.length>0&&!showPaste&&<span style={{color:MU,fontSize:9,letterSpacing:0,textTransform:"none",marginLeft:10}}>{list.length} products loaded · {fmt(totalNet)} net · <span style={{color:blended>=target?GR:RD}}>{blended.toFixed(1)}% GM</span>{flagCount>0&&<span style={{color:RD}}> · {flagCount} flagged</span>}</span>}
+              </div>
+              <div style={{display:"flex",gap:6}}>
+                {list.length>0&&<button onClick={()=>{if(window.confirm("Clear all product data?"))onUpdate([]);}} style={{padding:"4px 10px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>Clear</button>}
+                <button onClick={()=>setShowPaste(s=>!s)} style={{padding:"4px 12px",background:showPaste?A:"transparent",border:"1px solid "+(showPaste?A:BR),color:showPaste?"#fff":MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>{list.length?"Update":"+ Paste"}</button>
+              </div>
             </div>
-
             {showPaste&&(
-              <div style={{marginBottom:12}}>
-                <div style={{fontFamily:ff,fontSize:9,color:MU,marginBottom:5}}>
-                  Paste output from: <em>Pull a complete product margin report... Export as table using GraphQL</em>
-                </div>
-                <textarea value={raw} onChange={e=>setRaw(e.target.value)}
-                  placeholder={"Product	Variant	Units Sold	Gross Sales	Discounts	Returns	Net Sales	COGS/Unit	Total COGS	Gross Profit	Margin %"}
-                  rows={5}
+              <div>
+                <div style={{fontFamily:ff,fontSize:9,color:MU,marginBottom:5}}>Paste output from Shopify AI product margin report (tab-separated). New data merges with existing.</div>
+                <textarea value={raw} onChange={e=>setRaw(e.target.value)} placeholder={"Product\tVariant\tUnits Sold\tGross Sales\tDiscounts\tReturns\tNet Sales\tCOGS/Unit\tTotal COGS\tGross Profit\tMargin %"} rows={5}
                   style={{...inp,fontFamily:"monospace",fontSize:11,resize:"vertical"}}/>
                 <div style={{display:"flex",gap:8,marginTop:6,alignItems:"center"}}>
                   <button onClick={applyPaste} style={{padding:"6px 16px",background:A,border:"none",color:"#fff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>LOAD</button>
@@ -1187,30 +1384,20 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                 </div>
               </div>
             )}
-
-            {/* Shopify data summary */}
-            {list.length>0&&!showPaste&&(
-              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                {[["Products",list.length,MU],["Net Sales",fmt(totalNet),A],["Blended GM",blended.toFixed(1)+"%",blended>=target?GR:RD],["Flagged",flagCount,flagCount>0?RD:GR]].map(([l,v,c])=>(
-                  <div key={l} style={{flex:1,minWidth:80,background:S,borderRadius:radius,padding:"6px 10px"}}>
-                    <div style={{fontFamily:ff,fontSize:8,color:MU,textTransform:"uppercase",letterSpacing:0.7}}>{l}</div>
-                    <div style={{fontFamily:ff,fontSize:13,color:c,fontWeight:"bold"}}>{v}</div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
 
-          {/* ── SECTION 2: Product Catalogue (manual once) ── */}
+          {/* ── SECTION 2: Product Catalogue ── */}
           {list.length>0&&(
-            <div style={{padding:fullPage?"0 0 20px":"0 16px 0",borderBottom:"1px solid "+BR+"44",marginBottom:16}}>
-              <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase",marginBottom:8}}>2 — Product Catalogue <span style={{color:MU,fontSize:9,fontWeight:"normal",letterSpacing:0}}>set once, auto-applies</span></div>
+            <div style={{padding:"14px 16px",borderBottom:"1px solid "+BR+"44",background:S2}}>
+              <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase",marginBottom:8}}>
+                2 — Product Catalogue <span style={{color:MU,fontSize:9,fontWeight:"normal",letterSpacing:0,textTransform:"none"}}>click any row to edit · saves automatically</span>
+              </div>
               <div style={{overflowX:"auto"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontFamily:ff,fontSize:11}}>
+                <table style={{borderCollapse:"collapse",fontFamily:ff,fontSize:11,width:"100%"}}>
                   <thead>
-                    <tr style={{borderBottom:"1px solid "+BR}}>
+                    <tr>
                       {["Product","Pick & Pack","Packaging","Tariff %","Target GM%","Ship AU","Ship US","Ship Intl"].map(h=>(
-                        <th key={h} style={{padding:"5px 8px",color:MU,fontWeight:"normal",fontSize:8,letterSpacing:0.7,textTransform:"uppercase",textAlign:h==="Product"?"left":"center",whiteSpace:"nowrap"}}>{h}</th>
+                        <th key={h} style={{...thStyle,textAlign:h==="Product"?"left":"center"}}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -1219,131 +1406,180 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                       const c=catEntry(p.product);
                       const isEdit=editCat===p.product;
                       return(
-                        <tr key={i} style={{borderBottom:"1px solid "+BR+"22",background:isEdit?A+"11":"transparent"}} onClick={()=>setEditCat(isEdit?null:p.product)}>
-                          <td style={{padding:"6px 8px",color:TX,cursor:"pointer",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.product}</td>
-                          {isEdit?(
-                            <>
-                              <td style={{padding:"4px 6px"}}><input type="number" value={c.pickPack} onChange={e=>saveCat(p.product,"pickPack",parseFloat(e.target.value)||0)} style={{...inp,width:60}} onClick={e=>e.stopPropagation()}/></td>
-                              <td style={{padding:"4px 6px"}}>
-                                <select value={c.packagingType} onChange={e=>saveCat(p.product,"packagingType",e.target.value)} style={{...inp,width:80}} onClick={e=>e.stopPropagation()}>
-                                  <option value="satchel">Satchel</option>
-                                  <option value="giftbox">Gift Box</option>
-                                  <option value="poly">Polybag</option>
-                                </select>
-                              </td>
-                              <td style={{padding:"4px 6px"}}><input type="number" value={c.tariffPct} onChange={e=>saveCat(p.product,"tariffPct",parseFloat(e.target.value)||0)} style={{...inp,width:56}} onClick={e=>e.stopPropagation()}/></td>
-                              <td style={{padding:"4px 6px"}}><input type="number" value={c.targetMarginPct} onChange={e=>saveCat(p.product,"targetMarginPct",parseFloat(e.target.value)||0)} style={{...inp,width:56}} onClick={e=>e.stopPropagation()}/></td>
-                              <td style={{padding:"4px 6px"}}><input type="number" value={c.shippingAU} onChange={e=>saveCat(p.product,"shippingAU",parseFloat(e.target.value)||0)} style={{...inp,width:56}} onClick={e=>e.stopPropagation()}/></td>
-                              <td style={{padding:"4px 6px"}}><input type="number" value={c.shippingUS} onChange={e=>saveCat(p.product,"shippingUS",parseFloat(e.target.value)||0)} style={{...inp,width:56}} onClick={e=>e.stopPropagation()}/></td>
-                              <td style={{padding:"4px 6px"}}><input type="number" value={c.shippingIntl} onChange={e=>saveCat(p.product,"shippingIntl",parseFloat(e.target.value)||0)} style={{...inp,width:56}} onClick={e=>e.stopPropagation()}/></td>
-                            </>
-                          ):(
-                            <>
-                              <td style={{padding:"6px 8px",color:MU,textAlign:"center"}}>{c.pickPack>0?fmt(c.pickPack):<span style={{color:BR}}>—</span>}</td>
-                              <td style={{padding:"6px 8px",color:MU,textAlign:"center",fontSize:10}}>{c.packagingType}</td>
-                              <td style={{padding:"6px 8px",color:MU,textAlign:"center"}}>{c.tariffPct>0?c.tariffPct+"%":<span style={{color:BR}}>—</span>}</td>
-                              <td style={{padding:"6px 8px",color:MU,textAlign:"center"}}>{c.targetMarginPct}%</td>
-                              <td style={{padding:"6px 8px",color:MU,textAlign:"center"}}>{fmt(c.shippingAU)}</td>
-                              <td style={{padding:"6px 8px",color:MU,textAlign:"center"}}>{fmt(c.shippingUS)}</td>
-                              <td style={{padding:"6px 8px",color:MU,textAlign:"center"}}>{fmt(c.shippingIntl)}</td>
-                            </>
-                          )}
+                        <tr key={i} style={{borderBottom:"1px solid "+BR+"22",background:isEdit?A+"11":i%2===0?"transparent":S+"33",cursor:"pointer"}} onClick={()=>setEditCat(isEdit?null:p.product)}>
+                          <td style={{...tdStyle,color:TX,maxWidth:180}}>{p.product}</td>
+                          {isEdit?(<>
+                            <td style={{padding:"3px 4px"}}><input type="number" value={c.pickPack} onChange={e=>saveCat(p.product,"pickPack",parseFloat(e.target.value)||0)} style={{...inp,width:64}} onClick={e=>e.stopPropagation()}/></td>
+                            <td style={{padding:"3px 4px"}}><select value={c.packagingType} onChange={e=>saveCat(p.product,"packagingType",e.target.value)} style={{...inp,width:80}} onClick={e=>e.stopPropagation()}><option value="satchel">Satchel</option><option value="giftbox">Gift Box</option><option value="poly">Polybag</option></select></td>
+                            <td style={{padding:"3px 4px"}}><input type="number" value={c.tariffPct} onChange={e=>saveCat(p.product,"tariffPct",parseFloat(e.target.value)||0)} style={{...inp,width:58}} onClick={e=>e.stopPropagation()}/></td>
+                            <td style={{padding:"3px 4px"}}><input type="number" value={c.targetMarginPct} onChange={e=>saveCat(p.product,"targetMarginPct",parseFloat(e.target.value)||0)} style={{...inp,width:58}} onClick={e=>e.stopPropagation()}/></td>
+                            <td style={{padding:"3px 4px"}}><input type="number" value={c.shippingAU} onChange={e=>saveCat(p.product,"shippingAU",parseFloat(e.target.value)||0)} style={{...inp,width:58}} onClick={e=>e.stopPropagation()}/></td>
+                            <td style={{padding:"3px 4px"}}><input type="number" value={c.shippingUS} onChange={e=>saveCat(p.product,"shippingUS",parseFloat(e.target.value)||0)} style={{...inp,width:58}} onClick={e=>e.stopPropagation()}/></td>
+                            <td style={{padding:"3px 4px"}}><input type="number" value={c.shippingIntl} onChange={e=>saveCat(p.product,"shippingIntl",parseFloat(e.target.value)||0)} style={{...inp,width:58}} onClick={e=>e.stopPropagation()}/></td>
+                          </>):(<>
+                            <td style={{...tdStyle,color:MU,textAlign:"center"}}>{c.pickPack>0?fmt(c.pickPack):<span style={{color:BR}}>—</span>}</td>
+                            <td style={{...tdStyle,color:MU,textAlign:"center",fontSize:10}}>{c.packagingType}</td>
+                            <td style={{...tdStyle,color:MU,textAlign:"center"}}>{c.tariffPct>0?c.tariffPct+"%":<span style={{color:BR}}>—</span>}</td>
+                            <td style={{...tdStyle,color:MU,textAlign:"center"}}>{c.targetMarginPct}%</td>
+                            <td style={{...tdStyle,color:MU,textAlign:"center"}}>{fmt(c.shippingAU)}</td>
+                            <td style={{...tdStyle,color:MU,textAlign:"center"}}>{fmt(c.shippingUS)}</td>
+                            <td style={{...tdStyle,color:MU,textAlign:"center"}}>{fmt(c.shippingIntl)}</td>
+                          </>)}
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
-                <div style={{fontFamily:ff,fontSize:9,color:MU,marginTop:6}}>Click any row to edit its catalogue values</div>
               </div>
             </div>
           )}
 
-          {/* ── SECTION 3: Auto-Calculated Results ── */}
+          {/* ── SECTION 3: Analysis Table with full column controls ── */}
           {list.length>0&&(
-            <div style={{padding:fullPage?"0":"0 16px 14px"}}>
-              <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase",marginBottom:10}}>3 — Auto-Calculated</div>
+            <div style={{background:S2}}>
+              {/* Table toolbar */}
+              <div style={{padding:"10px 16px",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",borderBottom:"1px solid "+BR+"44"}}>
+                <span style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase",marginRight:4}}>3 — Analysis</span>
+                <span style={{fontFamily:ff,fontSize:10,color:MU}}>{sorted.length}/{enriched.length} products</span>
+                <div style={{flex:1}}/>
+                {/* Filter toggle */}
+                <button onClick={()=>setShowFilters(f=>!f)} style={{padding:"4px 10px",background:showFilters?A:"transparent",border:"1px solid "+(showFilters?A:BR),color:showFilters?"#fff":MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
+                  {Object.values(filters).some(v=>v)?"Filters ●":"Filters"}
+                </button>
+                {Object.values(filters).some(v=>v)&&<button onClick={()=>setFilters({})} style={{padding:"4px 10px",background:"transparent",border:"1px solid "+BR,color:RD,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius}}>Clear filters</button>}
+                <button onClick={()=>setColOrder(null)} title="Reset column order" style={{padding:"4px 10px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>Reset cols</button>
+                {/* Export */}
+                <div style={{position:"relative"}}>
+                  <button onClick={()=>setShowExport(e=>!e)} style={{padding:"4px 12px",background:showExport?A:"transparent",border:"1px solid "+(showExport?A:BR),color:showExport?"#fff":MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>Export ▾</button>
+                  {showExport&&(
+                    <div style={{position:"absolute",right:0,top:"110%",background:S2,border:"1px solid "+BR,borderRadius:radius,zIndex:100,minWidth:180,boxShadow:"0 8px 24px #00000066"}}>
+                      <button onClick={()=>{exportCSV();setShowExport(false);}} style={{display:"block",width:"100%",padding:"10px 16px",background:"transparent",border:"none",color:TX,fontFamily:ff,fontSize:11,cursor:"pointer",textAlign:"left"}}>
+                        ↓ Download CSV
+                      </button>
+                      <button onClick={()=>{exportText();setShowExport(false);}} style={{display:"block",width:"100%",padding:"10px 16px",background:"transparent",border:"none",color:A,fontFamily:ff,fontSize:11,cursor:"pointer",textAlign:"left",borderTop:"1px solid "+BR+"44"}}>
+                        ✦ Copy for Claude analysis
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {msg&&<span style={{fontFamily:ff,fontSize:11,color:GR}}>{msg}</span>}
+              </div>
+
+              {/* Filter row */}
+              {showFilters&&(
+                <div style={{padding:"8px 16px",display:"flex",gap:6,flexWrap:"wrap",borderBottom:"1px solid "+BR+"44",background:S}}>
+                  {activeCols.filter(c=>c.filterable).map(col=>(
+                    <div key={col.id} style={{display:"flex",flexDirection:"column",gap:2}}>
+                      <span style={{fontFamily:ff,fontSize:8,color:MU,letterSpacing:0.7,textTransform:"uppercase"}}>{getColLabel(col.id)}</span>
+                      <input value={filters[col.id]||""} onChange={e=>setFilters(f=>({...f,[col.id]:e.target.value}))}
+                        placeholder="filter…"
+                        style={{background:S2,border:"1px solid "+BR,color:TX,padding:"4px 8px",fontFamily:ff,fontSize:11,outline:"none",borderRadius:radius,width:120}}/>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* The table */}
               <div style={{overflowX:"auto"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontFamily:ff,fontSize:11}}>
+                <table style={{borderCollapse:"collapse",fontFamily:ff,tableLayout:"fixed"}}>
+                  <colgroup>
+                    {activeCols.map(col=><col key={col.id} style={{width:getColWidth(col.id)}}/>)}
+                  </colgroup>
                   <thead>
-                    <tr style={{borderBottom:"1px solid "+BR}}>
-                      {["Product","Avg Retail","Var Cost","Contrib GM","Break-even","Actual GM","Modelled GM","Variance","10% disc","15% disc","20% disc","25% disc"].map(h=>(
-                        <th key={h} style={{padding:"5px 8px",color:MU,fontWeight:"normal",fontSize:8,letterSpacing:0.7,textTransform:"uppercase",textAlign:h==="Product"?"left":"right",whiteSpace:"nowrap"}}>{h}</th>
+                    <tr>
+                      {activeCols.map(col=>(
+                        <th key={col.id}
+                          draggable
+                          onDragStart={e=>onDragStart(e,col.id)}
+                          onDragOver={e=>onDragOver(e,col.id)}
+                          onDrop={e=>onDrop(e,col.id)}
+                          style={{...thStyle,width:getColWidth(col.id),background:dragOver===col.id?A+"22":S2,outline:dragCol===col.id?"1px dashed "+A:"none"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:3,overflow:"hidden"}}>
+                            {/* Rename on double-click */}
+                            {editingColName===col.id?(
+                              <input autoFocus defaultValue={getColLabel(col.id)}
+                                onBlur={e=>{setColNames(n=>({...n,[col.id]:e.target.value||DEFAULT_COLS.find(c=>c.id===col.id)?.label}));setEditingColName(null);}}
+                                onKeyDown={e=>{if(e.key==="Enter"||e.key==="Escape")e.target.blur();}}
+                                style={{background:S,border:"1px solid "+A,color:TX,padding:"1px 4px",fontFamily:ff,fontSize:8,outline:"none",borderRadius:2,width:getColWidth(col.id)-20}}
+                                onClick={e=>e.stopPropagation()}/>
+                            ):(
+                              <span onDoubleClick={e=>{e.stopPropagation();setEditingColName(col.id);}}
+                                onClick={()=>col.sortable&&toggleSort(col.id)}
+                                style={{cursor:col.sortable?"pointer":"default",flex:1,overflow:"hidden",textOverflow:"ellipsis"}}
+                                title="Double-click to rename · Drag to reorder">
+                                {getColLabel(col.id)}
+                                {col.sortable&&sortCol===col.id&&<span style={{marginLeft:3}}>{sortDir==="asc"?"↑":"↓"}</span>}
+                              </span>
+                            )}
+                            {/* Resize handle */}
+                            <span onMouseDown={e=>startResize(e,col.id)}
+                              style={{position:"absolute",right:0,top:0,bottom:0,width:4,cursor:"col-resize",background:"transparent"}}
+                              onMouseEnter={e=>e.currentTarget.style.background=A+"66"}
+                              onMouseLeave={e=>e.currentTarget.style.background="transparent"}/>
+                          </div>
+                        </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {list.map((p,i)=>{
-                      const r=calcProduct(p);
-                      const productTarget=catEntry(p.product).targetMarginPct;
-                      const status=p.netSales<=0&&p.gross>0?"GIFTED":p.marginPct<productTarget?"LOW":"OK";
-                      const sc=status==="GIFTED"?RD:status==="LOW"?"#f59e0b":GR;
-                      return(
-                        <>{/* key workaround */}
-                          <tr style={{borderBottom:expandedProduct===p.product?"none":"1px solid "+BR+"33",background:i%2===0?"transparent":S+"44",cursor:"pointer"}}
-                            onClick={()=>setExpandedProduct(expandedProduct===p.product?null:p.product)}>
-                            <td style={{padding:"7px 8px",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                              <span style={{fontFamily:ff,fontSize:9,color:sc,fontWeight:"bold",marginRight:6}}>{status}</span>
-                              <span style={{color:TX}}>{p.product}</span>
-                              {p.variants?.length>1&&<span style={{fontFamily:ff,fontSize:8,color:MU,marginLeft:4}}>{expandedProduct===p.product?"▲":"▼"} {p.variants.length}v</span>}
+                    {sorted.map((row,i)=>(
+                      <React.Fragment key={row.product}>
+                        <tr style={{borderBottom:"1px solid "+BR+"22",background:i%2===0?"transparent":S+"33",cursor:"pointer"}}
+                          onClick={()=>setExpandedProduct(expandedProduct===row.product?null:row.product)}>
+                          {activeCols.map(col=>(
+                            <td key={col.id} style={{...tdStyle,color:getCellColor(row,col.id),textAlign:col.id==="product"?"left":"right",fontWeight:["actualMargin","contribMargin","status"].includes(col.id)?"bold":"normal",maxWidth:getColWidth(col.id)}}>
+                              {col.id==="product"?(
+                                <span>
+                                  {row.variants?.length>1&&<span style={{fontSize:8,color:MU,marginRight:4}}>{expandedProduct===row.product?"▼":"▶"}</span>}
+                                  {getCellVal(row,col.id)}
+                                </span>
+                              ):getCellVal(row,col.id)}
                             </td>
-                            <td style={{padding:"7px 8px",color:MU,textAlign:"right"}}>{r.avgRetail>0?fmt(r.avgRetail):"—"}</td>
-                            <td style={{padding:"7px 8px",color:MU,textAlign:"right"}}>{r.varCostUnit>0?fmt(r.varCostUnit):"—"}</td>
-                            <td style={{padding:"7px 8px",color:r.contributionMargin>=productTarget?GR:RD,textAlign:"right",fontWeight:"bold"}}>{r.avgRetail>0?pct(r.contributionMargin):"—"}</td>
-                            <td style={{padding:"7px 8px",color:MU,textAlign:"right"}}>{r.breakEven>0?fmt(r.breakEven):"—"}</td>
-                            <td style={{padding:"7px 8px",color:p.marginPct>=productTarget?GR:RD,textAlign:"right",fontWeight:"bold"}}>{p.netSales>0?pct(p.marginPct):"GIFTED"}</td>
-                            <td style={{padding:"7px 8px",color:r.modelledMargin>=productTarget?GR:RD,textAlign:"right"}}>{r.avgRetail>0?pct(r.modelledMargin):"—"}</td>
-                            <td style={{padding:"7px 8px",color:Math.abs(r.variance)>5?RD:MU,textAlign:"right"}}>{r.avgRetail>0?(r.variance>=0?"+":"")+r.variance.toFixed(1)+"%":"—"}</td>
-                            {r.discountLevels.slice(0,4).map(d=>(
-                              <td key={d.disc} style={{padding:"7px 8px",textAlign:"right",color:d.viable?GR:RD,fontWeight:!d.viable?"bold":"normal"}}>
-                                {r.avgRetail>0?pct(d.margin):"—"}
-                              </td>
-                            ))}
+                          ))}
+                        </tr>
+                        {expandedProduct===row.product&&row.variants?.length>1&&(
+                          <tr style={{borderBottom:"1px solid "+BR+"33"}}>
+                            <td colSpan={activeCols.length} style={{padding:"6px 8px 10px 24px",background:S+"88"}}>
+                              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                                {row.variants.map((v,j)=>(
+                                  <div key={j} style={{fontFamily:ff,fontSize:10,color:MU,background:S2,borderRadius:radius,padding:"4px 8px",border:"1px solid "+BR+"44"}}>
+                                    <span style={{color:TX,marginRight:6,fontWeight:"bold"}}>{v.variant}</span>
+                                    <span>{v.units}u</span>
+                                    <span style={{marginLeft:8,color:A}}>{fmt(v.netSales)}</span>
+                                    <span style={{marginLeft:8,color:v.discRate>20?RD:MU}}>{v.discRate.toFixed(1)}% disc</span>
+                                    <span style={{marginLeft:8,color:v.marginPct<(row.productTarget||target)?RD:GR,fontWeight:"bold"}}>{v.marginPct.toFixed(1)}%</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
                           </tr>
-                          {/* Variant drilldown */}
-                          {expandedProduct===p.product&&p.variants?.length>1&&(
-                            <tr style={{borderBottom:"1px solid "+BR+"33"}}>
-                              <td colSpan={12} style={{padding:"6px 8px 10px 24px",background:S+"88"}}>
-                                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                                  {p.variants.map((v,j)=>(
-                                    <div key={j} style={{fontFamily:ff,fontSize:10,color:MU,background:S2,borderRadius:radius,padding:"4px 8px",border:"1px solid "+BR+"44"}}>
-                                      <span style={{color:TX,marginRight:6}}>{v.variant}</span>
-                                      <span>{v.units}u</span>
-                                      <span style={{marginLeft:8,color:A}}>{fmt(v.netSales)}</span>
-                                      <span style={{marginLeft:8,color:v.discRate>20?RD:MU}}>{v.discRate.toFixed(1)}% disc</span>
-                                      <span style={{marginLeft:8,color:v.marginPct<productTarget?RD:GR,fontWeight:"bold"}}>{v.marginPct.toFixed(1)}%</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </>
-                      );
-                    })}
+                        )}
+                      </React.Fragment>
+                    ))}
                   </tbody>
                   <tfoot>
                     <tr style={{borderTop:"2px solid "+BR,background:S2}}>
-                      <td style={{padding:"7px 8px",color:A,fontWeight:"bold"}}>BLENDED</td>
-                      <td colSpan={2}/>
-                      <td style={{padding:"7px 8px",color:blended>=target?GR:RD,textAlign:"right",fontWeight:"bold"}}>{blended.toFixed(1)}%</td>
-                      <td colSpan={8}/>
+                      {activeCols.map((col,i)=>(
+                        <td key={col.id} style={{...tdStyle,fontWeight:"bold",textAlign:col.id==="product"?"left":"right"}}>
+                          {col.id==="product"?"TOTAL / BLENDED":
+                           col.id==="units"?enriched.reduce((s,p)=>s+p.units,0):
+                           col.id==="gross"?fmt(enriched.reduce((s,p)=>s+p.gross,0)):
+                           col.id==="netSales"?<span style={{color:A}}>{fmt(totalNet)}</span>:
+                           col.id==="totalCogs"?fmt(enriched.reduce((s,p)=>s+p.totalCogs,0)):
+                           col.id==="grossProfit"?<span style={{color:totalGP>=0?GR:RD}}>{fmt(totalGP)}</span>:
+                           col.id==="actualMargin"||col.id==="contribMargin"?<span style={{color:blended>=target?GR:RD}}>{blended.toFixed(1)}%</span>:
+                           ""}
+                        </td>
+                      ))}
                     </tr>
                   </tfoot>
                 </table>
               </div>
-              <div style={{fontFamily:ff,fontSize:9,color:MU,marginTop:8}}>
-                Variance = Actual GM − Modelled GM. Red discount cells = below product target margin. Click product row to see variants.
+              <div style={{padding:"6px 16px 10px",fontFamily:ff,fontSize:9,color:MU}}>
+                Sort: click column header · Rename: double-click header · Resize: drag right edge · Reorder: drag column · Filter: use Filters button
               </div>
             </div>
           )}
-
-          {/* Actions */}
-          <div style={{padding:fullPage?"12px 0 0":"10px 16px",display:"flex",alignItems:"center",gap:10,borderTop:"1px solid "+BR+"44",flexWrap:"wrap"}}>
-            {list.length>0&&<button onClick={()=>{if(window.confirm("Clear all product margin data?"))onUpdate([]);}}
-              style={{padding:"5px 12px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
-              Clear All
-            </button>}
-          </div>
         </div>
       )}
     </div>
