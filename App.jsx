@@ -367,18 +367,102 @@ async function saveAll(monthData,fixed,settings){
 
 // ─── Shopify Parser ───────────────────────────────────────────────────────────
 function parseShopify(raw){
-  if(!raw?.trim())return{};
-  const result={gross_sales:0,refunds:0,discounts:0,shipping_income:0};
+  if(!raw?.trim())return{revenue:{},cogs:{},opex:{}};
+
+  const revenue={};
+  const cogs={};
+  const opex={};
+
+  const getNum=line=>{
+    const nums=line.match(/[\d,]+\.?\d*/g);
+    if(!nums)return null;
+    return parseFloat(nums[nums.length-1].replace(/,/g,""))||0;
+  };
+  const getInt=line=>{
+    const nums=line.match(/\d+/g);
+    if(!nums)return null;
+    return parseInt(nums[nums.length-1])||0;
+  };
+
   raw.split("\n").forEach(line=>{
-    const low=line.toLowerCase(),nums=line.match(/[\d,]+\.?\d*/g);
-    if(!nums)return;
-    const val=parseFloat(nums[nums.length-1].replace(/,/g,""))||0;
-    if(low.includes("gross sale")||low.includes("total sale"))result.gross_sales=val;
-    else if(low.includes("refund")||low.includes("return"))result.refunds=val;
-    else if(low.includes("discount"))result.discounts=val;
-    else if(low.includes("shipping")&&!low.includes("free")&&!low.includes("carrier"))result.shipping_income=val;
+    const low=line.toLowerCase().trim();
+    if(!low)return;
+
+    // ── Revenue fields ──────────────────────────────────────────────────────
+    if(low.includes("gross sale")||low.includes("total sale")||low.includes("total revenue")){
+      const v=getNum(line); if(v!==null)revenue.gross_sales=v;
+    } else if((low.includes("refund")||low.includes("return"))&&!low.includes("shipping")){
+      const v=getNum(line); if(v!==null)revenue.refunds=v;
+    } else if(low.includes("discount")&&!low.includes("collab")&&!low.includes("staff")&&!low.includes("influencer")&&!low.includes("code breakdown")){
+      const v=getNum(line); if(v!==null)revenue.discounts=v;
+    } else if(low.includes("shipping")&&(low.includes("income")||low.includes("revenue")||low.includes("collected")||low.includes("charged"))){
+      const v=getNum(line); if(v!==null)revenue.shipping_income=v;
+    } else if(low.includes("paypal")||low.includes("pay pal")){
+      const v=getNum(line); if(v!==null)revenue.paypal_fees=v;
+
+    // ── COGS fields ─────────────────────────────────────────────────────────
+    } else if((low.includes("manufactur")&&(low.includes("product")||low.includes("cogs")||low.includes("cost of good")))||low.includes("product cogs")||low.includes("mfg product")){
+      const v=getNum(line); if(v!==null)cogs.manufacturing_product=v;
+    } else if((low.includes("manufactur")&&(low.includes("ship")||low.includes("inbound")||low.includes("freight")))||low.includes("inbound freight")||low.includes("mfg shipping")){
+      const v=getNum(line); if(v!==null)cogs.manufacturing_shipping=v;
+    } else if(low.includes("number of order")||low.includes("order count")||low.includes("total order")||(low.includes("order")&&low.includes("satchel"))){
+      const v=getInt(line); if(v!==null)cogs.satchel_count=v;
+    } else if(low.includes("other packaging")||low.includes("packaging cost")){
+      const v=getNum(line); if(v!==null)cogs.other_packaging=v;
+
+    // ── OPEX: Freight ───────────────────────────────────────────────────────
+    } else if(low.includes("auspost")||low.includes("aus post")||(low.includes("australia post"))){
+      const v=getNum(line); if(v!==null)opex.auspost=v;
+    } else if(low.includes("fedex")||low.includes("fed ex")||low.includes("international freight")||low.includes("dhl")||low.includes("ups")){
+      const v=getNum(line); if(v!==null)opex.fedex=v;
+    } else if(low.includes("custom")&&(low.includes("dut")||low.includes("tax")||low.includes("clearance"))){
+      const v=getNum(line); if(v!==null)opex.customs_duties=v;
+
+    // ── OPEX: Collabs ───────────────────────────────────────────────────────
+    } else if((low.includes("collab")&&low.includes("ship"))||(low.includes("influencer")&&low.includes("ship"))){
+      const v=getNum(line); if(v!==null)opex.collab_shipping=v;
+    } else if((low.includes("collab")&&(low.includes("product")||low.includes("cogs")))||(low.includes("influencer")&&low.includes("product"))){
+      const v=getNum(line); if(v!==null)opex.collab_product_cogs=v;
+    } else if(low.includes("uppromote")||low.includes("affiliate commission")||low.includes("referral commission")){
+      const v=getNum(line); if(v!==null)opex.uppromote_commission=v;
+    } else if(low.includes("paid collab")||low.includes("paid influencer")||(low.includes("collab fee")||low.includes("influencer fee"))){
+      const v=getNum(line); if(v!==null)opex.paid_collab_fees=v;
+
+    // ── OPEX: General ───────────────────────────────────────────────────────
+    } else if(low.includes("shopify app")){
+      const v=getNum(line); if(v!==null)opex.shopify_apps=v;
+    } else if(low.includes("shopify")&&!low.includes("app")){
+      const v=getNum(line); if(v!==null)opex.shopify=v;
+    } else if(low.includes("meta ad")||low.includes("tiktok ad")||low.includes("google ad")||low.includes("facebook ad")||(low.includes("paid ad"))){
+      const v=getNum(line); if(v!==null)opex.meta_tiktok_ads=v;
+    } else if(low.includes("model wage")||low.includes("model cost")||low.includes("content creator wage")){
+      const v=getNum(line); if(v!==null)opex.model_wages=v;
+    } else if(low.includes("rent")&&(low.includes("util")||low.includes("electric")||low.includes("water"))){
+      const v=getNum(line); if(v!==null)opex.rent_utilities=v;
+    } else if(low.includes("insurance")){
+      const v=getNum(line); if(v!==null)opex.insurance=v;
+    } else if(low.includes("xero")||(low.includes("accounting")&&!low.includes("bank"))){
+      const v=getNum(line); if(v!==null)opex.accounting_xero=v;
+    } else if(low.includes("deputy")||low.includes("rostering")){
+      const v=getNum(line); if(v!==null)opex.rostering_deputy=v;
+    } else if(low.includes("repliai")||low.includes("repli ai")||low.includes("customer service platform")){
+      const v=getNum(line); if(v!==null)opex.customer_service_repliai=v;
+    } else if(low.includes("internet")||low.includes("telephone")||low.includes("phone plan")){
+      const v=getNum(line); if(v!==null)opex.internet_phone=v;
+    } else if(low.includes("bank fee")||(low.includes("bank")&&low.includes("account"))){
+      const v=getNum(line); if(v!==null)opex.bank_accounting=v;
+    } else if(low.includes("legal")||low.includes("lawyer")||low.includes("solicitor")){
+      const v=getNum(line); if(v!==null)opex.legal=v;
+    } else if(low.includes("office cost")||low.includes("office supply")||low.includes("stationery")){
+      const v=getNum(line); if(v!==null)opex.office_costs=v;
+    } else if(low.includes("google workspace")||low.includes("microsoft 365")||low.includes("google admin")||low.includes("ms admin")){
+      const v=getNum(line); if(v!==null)opex.google_ms_admin=v;
+    }
   });
-  return Object.fromEntries(Object.entries(result).map(([k,v])=>[k,v||""]));
+
+  // Strip zeros (leave only fields that were actually found)
+  const clean=obj=>Object.fromEntries(Object.entries(obj).filter(([,v])=>v!==""&&v!==null&&v!==0).map(([k,v])=>[k,v]));
+  return{revenue:clean(revenue),cogs:clean(cogs),opex:clean(opex)};
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────
@@ -628,12 +712,28 @@ function ShopifyImport({week,onChange,labels}){
   const bi=useBI();
   const [raw,setRaw]=useState(week.shopifyRaw||"");
   const [msg,setMsg]=useState("");
+  const [detail,setDetail]=useState([]);
   function apply(){
     const parsed=parseShopify(raw);
-    const filled=Object.values(parsed).filter(v=>v!=="").length;
-    if(!filled){setMsg("No values detected - check format");return;}
-    onChange({...week,shopifyRaw:raw,revenue:{...week.revenue,...parsed}});
-    setMsg("Auto-filled "+filled+" fields");setTimeout(()=>setMsg(""),3000);
+    const rCount=Object.keys(parsed.revenue).length;
+    const cCount=Object.keys(parsed.cogs).length;
+    const oCount=Object.keys(parsed.opex).length;
+    const total=rCount+cCount+oCount;
+    if(!total){setMsg("No values detected — check format");setDetail([]);return;}
+    onChange({
+      ...week,
+      shopifyRaw:raw,
+      revenue:{...week.revenue,...parsed.revenue},
+      cogs:{...week.cogs,...parsed.cogs},
+      opex:{...week.opex,...parsed.opex},
+    });
+    const parts=[];
+    if(rCount)parts.push(rCount+" revenue");
+    if(cCount)parts.push(cCount+" COGS");
+    if(oCount)parts.push(oCount+" OPEX");
+    setMsg("Auto-filled "+total+" fields");
+    setDetail(parts);
+    setTimeout(()=>{setMsg("");setDetail([]);},4000);
   }
   return(
     <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"16px 18px",marginBottom:20}}>
@@ -642,11 +742,11 @@ function ShopifyImport({week,onChange,labels}){
       </div>
       <textarea value={raw} onChange={e=>setRaw(e.target.value)} placeholder="Paste Shopify CSV or tab-separated export here..." rows={4}
         style={{width:"100%",boxSizing:"border-box",background:S,border:"1px solid "+BR,color:TX,padding:"10px 12px",fontFamily:"monospace",fontSize:12,outline:"none",borderRadius:radius,resize:"vertical"}}/>
-      <div style={{display:"flex",alignItems:"center",gap:12,marginTop:10}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginTop:10,flexWrap:"wrap"}}>
         <button onClick={apply} style={{padding:"8px 18px",background:A,border:"none",color:"#000",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
           <E value={labels.sec_shopify_btn} onSave={v=>labels._save("sec_shopify_btn",v)} style={{fontFamily:ff,fontSize:12,color:"#000"}}/>
         </button>
-        {msg&&<span style={{fontFamily:ff,fontSize:12,color:msg.includes("No")?RD:GR}}>{msg}</span>}
+        {msg&&<span style={{fontFamily:ff,fontSize:12,color:msg.includes("No")?RD:GR}}>{msg}{detail.length?<span style={{color:MU,fontSize:11}}> ({detail.join(", ")})</span>:null}</span>}
       </div>
     </div>
   );
@@ -755,7 +855,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
       <ShopifyImport week={week} onChange={onChange} labels={labels}/>
 
       <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between"}}>
-        <div style={{flex:1}}><SH><E value={labels.sec_revenue} onSave={v=>labels._save("sec_revenue",v)} style={{color:A,fontFamily:ff,fontSize:10}}/></SH></div>
+        <div style={{flex:1}}><SH><E value={labels.sec_revenue} onSave={v=>labels._save("sec_revenue",v)} style={{color:"inherit",fontFamily:ff}}/></SH></div>
         <div style={{paddingBottom:14}}><ClearBtn label="Revenue & Deductions" onClear={()=>onChange({...week,revenue:{gross_sales:"",refunds:"",discounts:"",shipping_income:"",paypal_fees:""}})} /></div>
       </div>
       {/* Indented sub-fields */}
@@ -781,7 +881,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
       <Row><Badge small label={<E value={labels.field_net_revenue} onSave={v=>labels._save("field_net_revenue",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>} value={c.netRevenue} color={A}/></Row>
 
       <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between"}}>
-        <div style={{flex:1}}><SH><E value={labels.sec_cogs} onSave={v=>labels._save("sec_cogs",v)} style={{color:A,fontFamily:ff,fontSize:10}}/></SH></div>
+        <div style={{flex:1}}><SH><E value={labels.sec_cogs} onSave={v=>labels._save("sec_cogs",v)} style={{color:"inherit",fontFamily:ff}}/></SH></div>
         <div style={{paddingBottom:14}}><ClearBtn label="COGS section" onClear={()=>onChange({...week,cogs:{manufacturing_product:"",manufacturing_shipping:"",satchel_count:"",satchel_cost_each:"",other_packaging:""}})} /></div>
       </div>
       <div style={{paddingLeft:16,borderLeft:"2px solid "+A+"22",marginTop:14,marginBottom:4}}>
@@ -817,23 +917,23 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
       </Row>
 
       <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between"}}>
-        <div style={{flex:1}}><SH><E value={labels.sec_opex} onSave={v=>labels._save("sec_opex",v)} style={{color:A,fontFamily:ff,fontSize:10}}/></SH></div>
+        <div style={{flex:1}}><SH><E value={labels.sec_opex} onSave={v=>labels._save("sec_opex",v)} style={{color:"inherit",fontFamily:ff}}/></SH></div>
         <div style={{paddingBottom:14}}><ClearBtn label="OPEX section" onClear={()=>onChange({...week,opex:emptyOpex(keys),wages:emptyWages(wDepts)})} /></div>
       </div>
       <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:14,paddingLeft:16}}><E value={labels.sec_opex_sub} onSave={v=>labels._save("sec_opex_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}} multiline/></div>
 
       <div style={{paddingLeft:16,borderLeft:"2px solid "+A+"22",marginTop:10}}>
-        <SH sub><E value={labels.sec_freight} onSave={v=>labels._save("sec_freight",v)} style={{color:MU,fontFamily:ff,fontSize:9}}/></SH>
+        <SH sub><E value={labels.sec_freight} onSave={v=>labels._save("sec_freight",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
         <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_freight_sub} onSave={v=>labels._save("sec_freight_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
         <Grid>{freightKeys.map(({key,label})=>opexField(key,label))}</Grid>
         <Row><Badge small label="Total Freight" value={-c.totalFreight} color={RD}/></Row>
 
-        <SH sub><E value={labels.sec_collabs} onSave={v=>labels._save("sec_collabs",v)} style={{color:MU,fontFamily:ff,fontSize:9}}/></SH>
+        <SH sub><E value={labels.sec_collabs} onSave={v=>labels._save("sec_collabs",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
         <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_collabs_sub} onSave={v=>labels._save("sec_collabs_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
         <Grid>{collabKeys.map(({key,label})=>opexField(key,label))}</Grid>
         <Row><Badge small label="Total Collabs" value={-c.totalCollabs} color={RD}/></Row>
 
-        <SH sub><E value={labels.sec_wages} onSave={v=>labels._save("sec_wages",v)} style={{color:MU,fontFamily:ff,fontSize:9}}/></SH>
+        <SH sub><E value={labels.sec_wages} onSave={v=>labels._save("sec_wages",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
         <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_wages_sub} onSave={v=>labels._save("sec_wages_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
         {wDepts.map(dept=>(
           <div key={dept.key} style={{marginBottom:16}}>
@@ -849,7 +949,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
         ))}
         <Row><Badge small label="Total Wages" value={-c.totalWages} color={RD}/></Row>
 
-        <SH sub><E value={labels.sec_general} onSave={v=>labels._save("sec_general",v)} style={{color:MU,fontFamily:ff,fontSize:9}}/></SH>
+        <SH sub><E value={labels.sec_general} onSave={v=>labels._save("sec_general",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
         <Grid>{generalKeys.map(({key,label})=>opexField(key,label))}</Grid>
         <Row><Badge small label="Total OPEX" value={-c.totalOPEX} color={RD}/></Row>
       </div>
@@ -867,7 +967,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
         {/* Targets vs actuals inline */}
         <TargetsPanel calc={c} week={week} labels={labels}/>
       </div>
-      <SH><E value={labels.sec_notes} onSave={v=>labels._save("sec_notes",v)} style={{color:A,fontFamily:ff,fontSize:10}}/></SH>
+      <SH><E value={labels.sec_notes} onSave={v=>labels._save("sec_notes",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
       <textarea value={week.notes} onChange={e=>onChange({...week,notes:e.target.value})} placeholder="Unusual costs, one-offs, events..." rows={3}
         style={{width:"100%",boxSizing:"border-box",background:S,border:"1px solid "+BR,color:TX,padding:"10px 12px",fontFamily:ff,fontSize:14,outline:"none",borderRadius:radius,resize:"vertical"}}/>
 
@@ -1211,7 +1311,7 @@ function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,label
   const renameKey=(key,nl)=>{if(onSettingsChange){const nk=keys.map(k=>k.key===key?{...k,label:nl}:k);onSettingsChange({...settings,opexKeys:nk});}};
   const renderGroup=(groupKeys,titleLabelKey)=>(
     <div style={{marginBottom:20}}>
-      <SH sub><E value={labels[titleLabelKey]||groupKeys[0]?.group||"Group"} onSave={v=>labels._save(titleLabelKey,v)} style={{color:MU,fontFamily:ff,fontSize:9}}/></SH>
+      <SH sub><E value={labels[titleLabelKey]||groupKeys[0]?.group||"Group"} onSave={v=>labels._save(titleLabelKey,v)} style={{color:"inherit",fontFamily:ff}}/></SH>
       <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
         {groupKeys.map(({key,label})=>{
           const isF=fixedKeys.includes(key);
@@ -1778,7 +1878,7 @@ function ComparePage({allMonthData,fixed,opexKeys,depts,labels}){
 
   return(
     <div>
-      <SH><E value={labels.compare_title} onSave={v=>labels._save("compare_title",v)} style={{color:A,fontFamily:ff,fontSize:10}}/></SH>
+      <SH><E value={labels.compare_title} onSave={v=>labels._save("compare_title",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
       <div style={{fontFamily:ff,fontSize:13,color:MU,marginBottom:20}}>
         <E value={labels.compare_help} onSave={v=>labels._save("compare_help",v)} style={{color:MU,fontFamily:ff,fontSize:13}}/>
       </div>
