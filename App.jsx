@@ -1025,9 +1025,6 @@ function DiscountBreakdown({week,onChange,labels}){
     onChange({...week,codeData:newCodeData});
     setDiscMsg(`✓ Filled ${filled} code${filled>1?"s":""}`);setTimeout(()=>setDiscMsg(""),4000);
   };
-    setDiscMsg(`✓ Filled ${filled} code${filled!==1?"s":""} (zeros included — update when you have real data)`);
-    setTimeout(()=>setDiscMsg(""),6000);
-  };
 
   // Category totals
   const catTotals={};
