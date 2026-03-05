@@ -2566,7 +2566,17 @@ export default function App(){
   // Also ensure sub-keys from DEFAULT are present (user may have saved before sub-keys were added)
   const storedKeys=opexKeys.map(k=>k.key);
   DEFAULT_OPEX_KEYS.forEach(dk=>{if(!storedKeys.includes(dk.key))opexKeys.push(dk);});
-  const wageDepts=settings?.wageDepts||DEFAULT_WAGE_DEPTS;
+  // Merge DEFAULT_WAGE_DEPTS so new depts (e.g. Superannuation) always appear
+  // even if settings were saved before they were added
+  const storedDepts=settings?.wageDepts||DEFAULT_WAGE_DEPTS;
+  const wageDepts=DEFAULT_WAGE_DEPTS.map(def=>{
+    const stored=storedDepts.find(d=>d.key===def.key);
+    if(!stored)return def; // new dept not in storage — use default
+    // Merge subs: stored subs keep their labels, new default subs are appended
+    const storedSubKeys=stored.subs.map(s=>s.key);
+    const newSubs=def.subs.filter(s=>!storedSubKeys.includes(s.key));
+    return {...stored,subs:[...stored.subs,...newSubs]};
+  });
   const staff=settings?.staff||DEFAULT_STAFF;
   const theme=buildTheme(themeRaw);
 
