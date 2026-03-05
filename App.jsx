@@ -1082,162 +1082,119 @@ function ShopifyImport({week,onChange,labels}){
 function MetricsGuide({target}){
   const {S2,S,BR,A,MU,TX,ff,GR,RD,radius}=useTheme();
   const [open,setOpen]=useState(false);
-  const [activeMetric,setActiveMetric]=useState(null);
+  const [active,setActive]=useState(null);
 
   const metrics=[
-    {
-      id:"actualMargin",
-      name:"Actual GM %",
-      col:"Actual GM",
-      color:GR,
-      what:"The real gross margin you achieved after all discounts and returns. Calculated as (Net Sales − COGS) ÷ Net Sales.",
-      good:`Above ${target}% — your target. The higher, the more room you have to cover operating costs.`,
-      bad:`Below ${target}% — you're not generating enough gross profit per product to sustain the business after wages, freight, and OPEX.`,
-      action:"If consistently below target: raise the retail price, reduce the COGS, or stop running discounts on this product.",
-    },
-    {
-      id:"modelledMargin",
-      name:"Model GM %",
-      col:"Model GM",
-      color:"#7dd3fc",
-      what:"What the margin should be based on your Product Catalogue inputs — COGS, pick & pack, shipping, and tariffs. This is your theoretical margin at full retail price with no discounts.",
-      good:"Close to or above your target margin at full price.",
-      bad:"If Modelled GM is already below target at full price, the product's cost structure is broken — no discount should ever be run on it.",
-      action:"Use this as your pricing floor. If Model GM < target, you need to either raise retail price or reduce manufacturing/shipping costs.",
-    },
-    {
-      id:"variance",
-      name:"Variance",
-      col:"Variance",
-      color:"#f59e0b",
-      what:"Actual GM minus Modelled GM. Shows how much real-world performance deviated from what the numbers predicted.",
-      good:"Close to 0% — your model is accurate and discounts/returns are under control.",
-      bad:"Large negative variance means discounts, returns, or a different sales mix than expected ate into margin. Large positive variance is rare but means you sold more full-price than assumed.",
-      action:"If variance is consistently -5% or worse on a product, investigate: is it always discounted? High return rate? Selling primarily in a lower-margin market?",
-    },
-    {
-      id:"contribMargin",
-      name:"Contrib GM %",
-      col:"Contrib GM",
-      color:GR,
-      what:"Contribution margin — what percentage of each revenue dollar is left after all variable costs (COGS + pick & pack + shipping + tariffs). This is what actually contributes to covering your fixed costs.",
-      good:`Above ${target}% — each sale is meaningfully contributing to overhead and profit.`,
-      bad:"Low contribution margin means fixed costs will eat you alive at scale. Even if you sell a lot, you'll barely cover rent, wages, and OPEX.",
-      action:"Contribution margin is the most important metric for deciding whether to scale a product. Only scale products with healthy contribution margins.",
-    },
-    {
-      id:"breakEven",
-      name:"Break-even Price",
-      col:"Break-even",
-      color:"#c4b5fd",
-      what:`The minimum retail price at which this product hits your target margin of ${target}%, after all variable costs. Calculated as: Variable Cost ÷ (1 − Target Margin%).`,
-      good:"Your current retail price is comfortably above this number.",
-      bad:"Your retail price is at or below break-even — you are subsidising every sale.",
-      action:"Never run a discount that brings the effective sale price below break-even. This number is the absolute floor for any promotion.",
-    },
-    {
-      id:"varCost",
-      name:"Variable Cost",
-      col:"Var Cost",
-      color:MU,
-      what:"The total cost per unit to produce and deliver the product: COGS + pick & pack + weighted average outbound shipping + US tariff (if applicable). Pulled from your Product Catalogue.",
-      good:"Low relative to retail price — wide margin to work with.",
-      bad:"High variable cost squeezes margin and limits how aggressively you can discount.",
-      action:"Review your Product Catalogue entries. If variable cost seems too high, check whether your pick & pack estimate or shipping assumptions are accurate.",
-    },
-    {
-      id:"discRate",
-      name:"Disc %",
-      col:"Disc %",
-      color:RD,
-      what:"The percentage of gross sales that was given away as discounts on this product. Calculated as Total Discounts ÷ Gross Sales.",
-      good:"Under 10% — healthy promotional activity that doesn't meaningfully erode margin.",
-      bad:"Over 20% — you're training customers to wait for sales and destroying the perceived value of the product.",
-      action:"For products with high discount rates and low actual margin, stop the promotion or replace it with a smaller discount. Check which specific discount codes are hitting this product.",
-    },
-    {
-      id:"discLevels",
-      name:"@10% / @15% / @20% / @25% disc",
-      col:"Discount columns",
-      color:"#f59e0b",
-      what:"Shows what the gross margin would be at each discount level, based on your average retail price and variable costs. Green = above your product target. Red = below.",
-      good:"Most columns are green — you have flexibility to run promotions without destroying margin.",
-      bad:"Even the 10% column is red — this product cannot sustain any discount without going below target.",
-      action:"Before running any promotion, check these columns. If @20% is red, don't put this product in a 20% off sale. Use the highest green column as your maximum discount level.",
-    },
-    {
-      id:"status",
-      name:"Status",
-      col:"Status",
-      color:MU,
-      what:"A quick health flag for the product. OK = at or above target margin. LOW = below target margin but still generating some revenue. GIFTED = 100% discounted, zero net sales, full COGS unrecovered.",
-      good:"OK across the board.",
-      bad:"GIFTED is the worst outcome — you gave the product away entirely and still paid manufacturing costs. LOW means discounts or cost structure are breaking the economics.",
-      action:"GIFTED products should be reviewed for whether they're marketing investments (collabs, PR) or mistakes. LOW products need a pricing or discount strategy fix.",
-    },
+    {id:"actualMargin",name:"Actual Gross Margin",emoji:"📊",
+      what:"The real % of each sale left after paying for the product itself (COGS). E.g. 70% means you keep 70¢ from every $1 sold to cover all other costs.",
+      good:`Above ${target}% — leaves room to pay wages, freight, rent, and still profit.`,
+      bad:`Below ${target}% — you're not making enough gross profit to cover running costs.`,
+      action:"Raise retail price, cut manufacturing cost, or stop discounting this product.",color:GR},
+    {id:"modelledMargin",name:"Modelled Margin",emoji:"🔮",
+      what:"What the margin should be at full retail price, based on your cost inputs (COGS + pick & pack + shipping + tariffs). Your theoretical best-case.",
+      good:"Well above your target — room to discount a little without going underwater.",
+      bad:"Below target even at full price — the product's costs are too high. No promotion should ever run on it.",
+      action:"Fix the cost structure first: renegotiate manufacturing, reduce shipping, or raise retail price.",color:"#7dd3fc"},
+    {id:"variance",name:"Variance",emoji:"⚡",
+      what:"Actual margin minus Modelled margin. Shows how much real-world results deviated from the model — caused by discounts, returns, or a different sales mix.",
+      good:"Near 0% — your model is accurate and operations are clean.",
+      bad:"Negative variance > 5% means discounts or returns are eating margin more than expected.",
+      action:"Dig into which discount codes hit this product. Check return rate. Tighten discount eligibility.",color:"#f59e0b"},
+    {id:"contribMargin",name:"Contribution Margin",emoji:"💰",
+      what:"After every variable cost — product, shipping, pick & pack, tariffs — what % is left to contribute toward fixed costs (rent, wages, subscriptions). The true measure of a product's profitability.",
+      good:`Above ${target}% — each unit sold is genuinely helping cover overhead.`,
+      bad:"Low contribution margin means even at high volume you'll barely break even.",
+      action:"Only scale products with healthy contribution margins. Low contrib = scaling loses more money.",color:GR},
+    {id:"breakEven",name:"Break-even Price",emoji:"⚖️",
+      what:`The lowest retail price at which this product hits your ${target}% target margin. Calculated from: Variable Cost ÷ (1 − Target%). This is your pricing floor.`,
+      good:"Current retail price is well above this number.",
+      bad:"Retail price is close to or below break-even — every sale is subsidised.",
+      action:"Never run a discount that brings effective price below this number. Pin it above the break-even.",color:"#c4b5fd"},
+    {id:"discRate",name:"Discount Rate",emoji:"🏷️",
+      what:"What % of gross sales was given away as discounts. High discount rates erode perceived value and train customers to never pay full price.",
+      good:"Under 10% — occasional healthy promotion.",
+      bad:"Over 20% — customers are waiting for sales. You're competing with yourself.",
+      action:"Audit which codes are hitting this product. Exclude high-margin products from blanket sitewide sales.",color:RD},
+    {id:"discLevels",name:"Discount Columns (@10% @15% @20% @25%)",emoji:"📉",
+      what:"If you ran a 10%, 15%, 20%, or 25% promotion, what would the gross margin be? Green = still above your target. Red = below target, would destroy margin.",
+      good:"Most columns are green — flexible to promote without breaking economics.",
+      bad:"Even @10% is red — this product cannot support any discount at all.",
+      action:"Before any sale, check these. The last green column is your maximum safe discount depth for this product.",color:"#f59e0b"},
+    {id:"status",name:"Status Flag",emoji:"🚦",
+      what:"OK = at or above target margin. LOW = selling but below target margin. GIFTED = 100% discounted, zero revenue, full COGS unrecovered.",
+      good:"All OK.",
+      bad:"GIFTED is the costliest — you paid manufacturing with zero return. LOW means the economics need fixing.",
+      action:"Review GIFTED products: are they intentional PR/collab investments? LOW products need a price or discount strategy change.",color:MU},
   ];
 
   return(
     <div style={{borderTop:"1px solid "+BR+"44"}}>
-      {/* Toggle header */}
-      <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",cursor:"pointer",userSelect:"none",background:S2}}>
+      <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 20px",cursor:"pointer",userSelect:"none",background:S2}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <span style={{fontFamily:ff,fontSize:10,color:open?A:MU,letterSpacing:1.5,textTransform:"uppercase"}}>4 — Metrics Guide</span>
-          <span style={{fontFamily:ff,fontSize:9,color:MU}}>what each column means and what to do with it</span>
+          <span style={{fontSize:16}}>📖</span>
+          <div>
+            <div style={{fontFamily:ff,fontSize:12,color:open?A:TX,fontWeight:"bold"}}>Metrics Guide</div>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:1}}>What every number means and what to do about it</div>
+          </div>
         </div>
-        <span style={{fontFamily:ff,fontSize:10,color:MU}}>{open?"▲":"▼"}</span>
+        <span style={{fontFamily:ff,fontSize:11,color:MU}}>{open?"▲":"▼"}</span>
       </div>
 
       {open&&(
-        <div style={{padding:"0 16px 20px",background:S2}}>
-          {/* Metric selector */}
+        <div style={{padding:"0 20px 20px",background:S2}}>
+          {/* pill selector */}
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16,paddingTop:4}}>
             {metrics.map(m=>(
-              <button key={m.id} onClick={()=>setActiveMetric(activeMetric===m.id?null:m.id)}
-                style={{padding:"5px 12px",background:activeMetric===m.id?m.color+"22":"transparent",border:"1px solid "+(activeMetric===m.id?m.color:BR),color:activeMetric===m.id?m.color:MU,fontFamily:ff,fontSize:10,cursor:"pointer",borderRadius:radius,letterSpacing:0.5,transition:"all 0.15s"}}>
-                {m.name}
+              <button key={m.id} onClick={()=>setActive(active===m.id?null:m.id)}
+                style={{padding:"6px 12px",background:active===m.id?m.color+"22":"transparent",border:"1px solid "+(active===m.id?m.color:BR),color:active===m.id?m.color:MU,fontFamily:ff,fontSize:10,cursor:"pointer",borderRadius:20,transition:"all 0.15s",display:"flex",alignItems:"center",gap:5}}>
+                <span>{m.emoji}</span><span>{m.name}</span>
               </button>
             ))}
           </div>
 
-          {/* Show all if none selected */}
-          {!activeMetric&&(
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:10}}>
+          {/* grid of cards when none selected */}
+          {!active&&(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:10}}>
               {metrics.map(m=>(
-                <div key={m.id} onClick={()=>setActiveMetric(m.id)}
-                  style={{background:S,border:"1px solid "+BR+"66",borderRadius:radius+1,padding:"12px 14px",cursor:"pointer",transition:"border-color 0.15s",borderLeft:"3px solid "+m.color}}
-                  onMouseEnter={e=>e.currentTarget.style.borderColor=m.color}
-                  onMouseLeave={e=>e.currentTarget.style.borderColor=BR+"66"}>
-                  <div style={{fontFamily:ff,fontSize:11,color:TX,fontWeight:"bold",marginBottom:4}}>{m.name}</div>
-                  <div style={{fontFamily:ff,fontSize:10,color:MU,lineHeight:1.6,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{m.what}</div>
-                  <div style={{fontFamily:ff,fontSize:9,color:m.color,marginTop:6,letterSpacing:0.5}}>Click to expand →</div>
+                <div key={m.id} onClick={()=>setActive(m.id)}
+                  style={{background:S,border:"1px solid "+BR+"44",borderRadius:radius+2,padding:"14px 16px",cursor:"pointer",borderLeft:"3px solid "+m.color,transition:"transform 0.12s,border-color 0.15s"}}
+                  onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-1px)";e.currentTarget.style.borderColor=m.color;}}
+                  onMouseLeave={e=>{e.currentTarget.style.transform="";e.currentTarget.style.borderColor=BR+"44";}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                    <span style={{fontSize:18}}>{m.emoji}</span>
+                    <span style={{fontFamily:ff,fontSize:12,color:TX,fontWeight:"bold"}}>{m.name}</span>
+                  </div>
+                  <div style={{fontFamily:ff,fontSize:11,color:MU,lineHeight:1.6,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{m.what}</div>
+                  <div style={{fontFamily:ff,fontSize:9,color:m.color,marginTop:8,letterSpacing:0.5}}>Click to read more →</div>
                 </div>
               ))}
             </div>
           )}
 
-          {/* Expanded metric detail */}
-          {activeMetric&&(()=>{
-            const m=metrics.find(x=>x.id===activeMetric);
+          {/* expanded detail */}
+          {active&&(()=>{
+            const m=metrics.find(x=>x.id===active);
             if(!m)return null;
             return(
-              <div style={{background:S,border:"1px solid "+m.color+"44",borderRadius:radius+2,padding:"20px 22px",borderLeft:"4px solid "+m.color}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
-                  <div>
-                    <div style={{fontFamily:ff,fontSize:14,color:TX,fontWeight:"bold",marginBottom:2}}>{m.name}</div>
-                    <div style={{fontFamily:ff,fontSize:9,color:MU,letterSpacing:0.7,textTransform:"uppercase"}}>Column: {m.col}</div>
+              <div style={{background:S,border:"1px solid "+m.color+"55",borderRadius:radius+2,padding:"20px 24px",borderLeft:"4px solid "+m.color}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:24}}>{m.emoji}</span>
+                    <div>
+                      <div style={{fontFamily:ff,fontSize:15,color:TX,fontWeight:"bold"}}>{m.name}</div>
+                    </div>
                   </div>
-                  <button onClick={()=>setActiveMetric(null)} style={{background:"transparent",border:"none",color:MU,fontFamily:ff,fontSize:16,cursor:"pointer",padding:"0 4px",lineHeight:1}}>✕</button>
+                  <button onClick={()=>setActive(null)} style={{background:"transparent",border:"none",color:MU,fontSize:18,cursor:"pointer",padding:"0 4px",lineHeight:1}}>✕</button>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr",gap:12}}>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:10}}>
                   {[
-                    {label:"What it is",text:m.what,color:A},
-                    {label:"✓ Healthy",text:m.good,color:GR},
-                    {label:"✗ Warning sign",text:m.bad,color:RD},
-                    {label:"→ What to do",text:m.action,color:"#f59e0b"},
-                  ].map(({label,text,color})=>(
-                    <div key={label} style={{padding:"10px 14px",background:S2,borderRadius:radius,borderLeft:"2px solid "+color+"66"}}>
-                      <div style={{fontFamily:ff,fontSize:9,color:color,letterSpacing:1,textTransform:"uppercase",marginBottom:5}}>{label}</div>
+                    {label:"What it measures",text:m.what,color:A,emoji:"📌"},
+                    {label:"Healthy looks like",text:m.good,color:GR,emoji:"✅"},
+                    {label:"Warning sign",text:m.bad,color:RD,emoji:"⚠️"},
+                    {label:"What to do",text:m.action,color:"#f59e0b",emoji:"→"},
+                  ].map(({label,text,color,emoji})=>(
+                    <div key={label} style={{padding:"12px 14px",background:S2,borderRadius:radius,borderTop:"2px solid "+color+"66"}}>
+                      <div style={{fontFamily:ff,fontSize:9,color:color,letterSpacing:0.8,textTransform:"uppercase",marginBottom:6,display:"flex",alignItems:"center",gap:4}}><span>{emoji}</span>{label}</div>
                       <div style={{fontFamily:ff,fontSize:12,color:TX,lineHeight:1.7}}>{text}</div>
                     </div>
                   ))}
@@ -1251,8 +1208,8 @@ function MetricsGuide({target}){
   );
 }
 
-function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targetMargin,fullPage}){
-  const {S2,BR,A,S,TX,ff,MU,GR,RD,radius}=useTheme();
+function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targetMargin,fullPage,satchelCost}){
+  const {S2,S,BR,A,MU,TX,ff,GR,RD,radius}=useTheme();
   const [raw,setRaw]=useState("");
   const [msg,setMsg]=useState("");
   const [open,setOpen]=useState(!!fullPage);
@@ -1269,19 +1226,19 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
   const [editingColName,setEditingColName]=useState(null);
   const [dragCol,setDragCol]=useState(null);
   const [dragOver,setDragOver]=useState(null);
-  const [showExport,setShowExport]=useState(false); // kept for potential future use
-  const resizeRef=useRef({});
+  const [activeTab,setActiveTab]=useState("overview");
   const target=targetMargin||55;
   const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
   const pct=v=>v.toFixed(1)+"%";
   const list=products||[];
   const cat=catalogue||{};
+  // satchel cost from fixed costs section
+  const satchelPerOrder=parseFloat(satchelCost)||0.85;
 
-  // Default columns definition
   const DEFAULT_COLS=[
     {id:"product",label:"Product",width:180,sortable:true,filterable:true},
     {id:"units",label:"Units",width:58,sortable:true},
-    {id:"gross",label:"Gross",width:84,sortable:true},
+    {id:"gross",label:"Gross Sales",width:92,sortable:true},
     {id:"discRate",label:"Disc %",width:62,sortable:true},
     {id:"netSales",label:"Net Sales",width:90,sortable:true},
     {id:"totalCogs",label:"COGS",width:80,sortable:true},
@@ -1291,11 +1248,11 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
     {id:"variance",label:"Variance",width:70,sortable:true},
     {id:"contribMargin",label:"Contrib GM",width:80,sortable:true},
     {id:"breakEven",label:"Break-even",width:84,sortable:true},
-    {id:"varCost",label:"Var Cost",width:76,sortable:true},
-    {id:"disc10",label:"@10% disc",width:72,sortable:true},
-    {id:"disc15",label:"@15% disc",width:72,sortable:true},
-    {id:"disc20",label:"@20% disc",width:72,sortable:true},
-    {id:"disc25",label:"@25% disc",width:72,sortable:true},
+    {id:"varCost",label:"Var Cost/unit",width:88,sortable:true},
+    {id:"disc10",label:"@10%",width:64,sortable:true},
+    {id:"disc15",label:"@15%",width:64,sortable:true},
+    {id:"disc20",label:"@20%",width:64,sortable:true},
+    {id:"disc25",label:"@25%",width:64,sortable:true},
     {id:"status",label:"Status",width:64,sortable:true,filterable:true},
   ];
 
@@ -1307,7 +1264,7 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
   const getColLabel=id=>colNames[id]||DEFAULT_COLS.find(c=>c.id===id)?.label||id;
   const getColWidth=id=>colWidths[id]||(DEFAULT_COLS.find(c=>c.id===id)?.width||90);
 
-  const catEntry=name=>cat[name]||{pickPack:0,packagingType:"satchel",tariffPct:0,targetMarginPct:target,shippingAU:8,shippingUS:18,shippingIntl:22};
+  const catEntry=name=>cat[name]||{pickPack:0,tariffPct:0,targetMarginPct:target,shippingAU:8,shippingUS:18,shippingIntl:22};
   const saveCat=(name,field,val)=>onCatalogueUpdate({...cat,[name]:{...catEntry(name),[field]:val}});
 
   const calcProduct=p=>{
@@ -1315,63 +1272,57 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
     const avgRetail=p.units>0?p.gross/p.units:0;
     const cogsUnit=p.avgCogsUnit||0;
     const avgShipping=c.shippingAU*0.7+c.shippingUS*0.2+c.shippingIntl*0.1;
-    const varCostUnit=cogsUnit+c.pickPack+avgShipping+(cogsUnit*(c.tariffPct/100));
+    // Satchel cost comes from fixed section (per order = per unit for simplicity)
+    const varCostUnit=cogsUnit+c.pickPack+satchelPerOrder+avgShipping+(cogsUnit*(c.tariffPct/100));
     const contribMargin=avgRetail>0?((avgRetail-varCostUnit)/avgRetail)*100:0;
-    const breakEven=varCostUnit>0&&c.targetMarginPct<100?varCostUnit/(1-(c.targetMarginPct/100)):0;
+    const productTarget=c.targetMarginPct;
+    const breakEven=varCostUnit>0&&productTarget<100?varCostUnit/(1-(productTarget/100)):0;
     const modelledMargin=avgRetail>0?((avgRetail-varCostUnit)/avgRetail)*100:0;
     const actualMargin=p.marginPct;
     const variance=actualMargin-modelledMargin;
     const discLevels=[10,15,20,25].map(d=>{
       const dp=avgRetail*(1-d/100);
       const m=dp>0?((dp-varCostUnit)/dp)*100:0;
-      return{disc:d,margin:m,viable:m>=c.targetMarginPct};
+      return{disc:d,margin:m,viable:m>=productTarget};
     });
-    return{cogsUnit,varCostUnit,avgRetail,contribMargin,breakEven,modelledMargin,actualMargin,variance,discLevels,productTarget:c.targetMarginPct};
+    return{cogsUnit,varCostUnit,avgRetail,contribMargin,breakEven,modelledMargin,actualMargin,variance,discLevels,productTarget};
   };
 
-  // Enrich list with calcs
   const enriched=useMemo(()=>list.map(p=>{
     const r=calcProduct(p);
     const st=p.netSales<=0&&p.gross>0?"GIFTED":p.marginPct<r.productTarget?"LOW":"OK";
     return{...p,...r,status:st};
-  }),[list,cat,target]);
+  }),[list,cat,target,satchelPerOrder]);
 
-  // Filter
   const filtered=useMemo(()=>{
     let rows=[...enriched];
     Object.entries(filters).forEach(([col,val])=>{
       if(!val)return;
       const v=val.toLowerCase();
-      rows=rows.filter(r=>{
-        const cell=String(r[col]||"").toLowerCase();
-        return cell.includes(v);
-      });
+      rows=rows.filter(r=>String(r[col]||"").toLowerCase().includes(v));
     });
     return rows;
   },[enriched,filters]);
 
-  // Sort
-  const sorted=useMemo(()=>{
-    const rows=[...filtered];
-    rows.sort((a,b)=>{
-      let av=a[sortCol],bv=b[sortCol];
-      if(typeof av==="string")av=av.toLowerCase();
-      if(typeof bv==="string")bv=bv.toLowerCase();
-      if(av<bv)return sortDir==="asc"?-1:1;
-      if(av>bv)return sortDir==="asc"?1:-1;
-      return 0;
-    });
-    return rows;
-  },[filtered,sortCol,sortDir]);
+  const sorted=useMemo(()=>[...filtered].sort((a,b)=>{
+    let av=a[sortCol],bv=b[sortCol];
+    if(typeof av==="string")av=av.toLowerCase();
+    if(typeof bv==="string")bv=bv.toLowerCase();
+    if(av<bv)return sortDir==="asc"?-1:1;
+    if(av>bv)return sortDir==="asc"?1:-1;
+    return 0;
+  }),[filtered,sortCol,sortDir]);
 
   const totalNet=enriched.reduce((s,p)=>s+p.netSales,0);
   const totalGP=enriched.reduce((s,p)=>s+p.grossProfit,0);
   const blended=totalNet>0?(totalGP/totalNet)*100:0;
-  const flagCount=enriched.filter(p=>p.status!=="OK").length;
+  const okCount=enriched.filter(p=>p.status==="OK").length;
+  const lowCount=enriched.filter(p=>p.status==="LOW").length;
+  const giftedCount=enriched.filter(p=>p.status==="GIFTED").length;
 
   function applyPaste(){
     const parsed=parseProductMargin(raw);
-    if(!parsed.length){setMsg("No data detected");return;}
+    if(!parsed.length){setMsg("No data detected — check format");return;}
     const existing={};
     list.forEach(p=>{existing[p.product]=p;});
     parsed.forEach(p=>{existing[p.product]=p;});
@@ -1381,18 +1332,14 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
     setTimeout(()=>setMsg(""),3000);
   }
 
-  // Column resize
   function startResize(e,colId){
     e.preventDefault();
-    const startX=e.clientX;
-    const startW=getColWidth(colId);
+    const startX=e.clientX,startW=getColWidth(colId);
     const onMove=ev=>setColWidths(w=>({...w,[colId]:Math.max(50,startW+ev.clientX-startX)}));
     const onUp=()=>{document.removeEventListener("mousemove",onMove);document.removeEventListener("mouseup",onUp);};
-    document.addEventListener("mousemove",onMove);
-    document.addEventListener("mouseup",onUp);
+    document.addEventListener("mousemove",onMove);document.addEventListener("mouseup",onUp);
   }
 
-  // Column drag-reorder
   function onDragStart(e,id){setDragCol(id);e.dataTransfer.effectAllowed="move";}
   function onDragOver(e,id){e.preventDefault();setDragOver(id);}
   function onDrop(e,id){
@@ -1405,13 +1352,11 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
     setColOrder(next);setDragCol(null);setDragOver(null);
   }
 
-  // Sort toggle
   function toggleSort(id){
     if(sortCol===id)setSortDir(d=>d==="asc"?"desc":"asc");
     else{setSortCol(id);setSortDir("desc");}
   }
 
-  // Cell value getter
   function getCellVal(row,colId){
     switch(colId){
       case"product":return row.product;
@@ -1436,7 +1381,6 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
     }
   }
 
-  // Cell color
   function getCellColor(row,colId){
     const pt=row.productTarget||target;
     switch(colId){
@@ -1456,7 +1400,6 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
     }
   }
 
-  // Export to CSV
   function exportCSV(){
     const headers=activeCols.map(c=>getColLabel(c.id));
     const rows=sorted.map(row=>activeCols.map(c=>{
@@ -1470,190 +1413,291 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
     URL.revokeObjectURL(url);
   }
 
-  // Export to Claude-ready text
   function exportText(){
     const fmtN=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
-    let t="=== PRODUCT MARGIN ANALYSIS ===\n";
-    t+="Generated: "+new Date().toLocaleDateString("en-AU")+"\n";
-    t+="Products: "+enriched.length+" | Blended GM: "+blended.toFixed(1)+"% | Target: "+target+"%\n";
+    let t="=== PRODUCT MARGIN ANALYSIS ===\nGenerated: "+new Date().toLocaleDateString("en-AU")+"\n";
+    t+="Products: "+enriched.length+" | Blended GM: "+blended.toFixed(1)+"% | Target: "+target+"% | Satchel cost used: "+fmtN(satchelPerOrder)+"\n";
     t+="Total Net Sales: "+fmtN(totalNet)+" | Total GP: "+fmtN(totalGP)+"\n\n";
     const below=enriched.filter(p=>p.status==="LOW");
     const gifted=enriched.filter(p=>p.status==="GIFTED");
-    if(gifted.length){
-      t+="--- FULLY GIFTED (100% discounted, unrecovered COGS) ---\n";
-      gifted.forEach(p=>{t+="  "+p.product+": "+p.units+"u | Gross "+fmtN(p.gross)+" | COGS unrecovered "+fmtN(p.totalCogs)+"\n";});
-      t+="\n";
-    }
-    if(below.length){
-      t+="--- BELOW TARGET MARGIN ("+target+"%) ---\n";
-      below.forEach(p=>{
-        const r=calcProduct(p);
-        t+="  "+p.product+": actual "+p.marginPct.toFixed(1)+"% vs model "+r.modelledMargin.toFixed(1)+"% | disc rate "+p.discRate.toFixed(1)+"% | break-even "+fmtN(r.breakEven)+"\n";
-        t+="    Discount viability: "+r.discLevels.map(d=>"@"+d.disc+"% → "+d.margin.toFixed(1)+"%"+(d.viable?" ✓":" ✗")).join(" | ")+"\n";
-      });
-      t+="\n";
-    }
+    if(gifted.length){t+="--- FULLY GIFTED ---\n";gifted.forEach(p=>{t+="  "+p.product+": "+p.units+"u | Gross "+fmtN(p.gross)+" | COGS unrecovered "+fmtN(p.totalCogs)+"\n";});t+="\n";}
+    if(below.length){t+="--- BELOW TARGET ("+target+"%) ---\n";below.forEach(p=>{const r=calcProduct(p);t+="  "+p.product+": actual "+p.marginPct.toFixed(1)+"% | disc rate "+p.discRate.toFixed(1)+"% | break-even "+fmtN(r.breakEven)+"\n    Discount viability: "+r.discLevels.map(d=>"@"+d.disc+"% → "+d.margin.toFixed(1)+"%"+(d.viable?" ✓":" ✗")).join(" | ")+"\n";});t+="\n";}
     t+="--- ALL PRODUCTS ---\n";
-    sorted.forEach(p=>{
-      const r=calcProduct(p);
-      t+="  "+p.product+" ["+p.status+"]: "+p.units+"u | Net "+fmtN(p.netSales)+" | Actual GM "+p.marginPct.toFixed(1)+"% | Model "+r.modelledMargin.toFixed(1)+"% | Var "+((r.variance>=0?"+":"")+r.variance.toFixed(1))+"%\n";
-      t+="    Var cost: "+fmtN(r.varCostUnit)+" | Break-even: "+fmtN(r.breakEven)+" | Disc: 10%→"+r.discLevels[0].margin.toFixed(1)+"% 15%→"+r.discLevels[1].margin.toFixed(1)+"% 20%→"+r.discLevels[2].margin.toFixed(1)+"% 25%→"+r.discLevels[3].margin.toFixed(1)+"%\n";
-    });
-    t+="\n=== END MARGIN DATA ===\n\n";
-    t+="You are a senior pricing strategist. Analyse the above product margin data and provide:\n";
-    t+="1. MARGIN HEALTH — Which products are structurally profitable vs marginal vs loss-making? What is the weighted blended margin telling you?\n";
-    t+="2. DISCOUNT DAMAGE — For each discounted product, at what discount level does margin become unviable? Name the products and the thresholds.\n";
-    t+="3. GIFTED PRODUCTS — What is the total unrecovered COGS from fully gifted products? Is this a marketing cost or a process failure?\n";
-    t+="4. PRICING RECOMMENDATIONS — Which products need a retail price increase to hit target margin? By how much? Give exact dollar amounts.\n";
-    t+="5. VARIANCE ANALYSIS — Where actual GM deviates from modelled GM by more than 5%, diagnose why (returns, discount mix, channel mix).\n";
-    t+="6. TOP 3 ACTIONS — Exact dollar impact, mechanism, and timeline for each.\n\nUse exact figures. Be specific. Make it actionable.";
+    sorted.forEach(p=>{const r=calcProduct(p);t+="  "+p.product+" ["+p.status+"]: "+p.units+"u | Net "+fmtN(p.netSales)+" | Actual GM "+p.marginPct.toFixed(1)+"% | Model "+r.modelledMargin.toFixed(1)+"% | Var "+((r.variance>=0?"+":"")+r.variance.toFixed(1))+"%\n    Var cost: "+fmtN(r.varCostUnit)+" | Break-even: "+fmtN(r.breakEven)+" | "+r.discLevels.map(d=>"@"+d.disc+"%→"+d.margin.toFixed(1)+"%").join(" ")+"\n";});
+    t+="\n=== END MARGIN DATA ===\n\nYou are a senior pricing strategist. Analyse this product margin data:\n1. MARGIN HEALTH — Which products are structurally profitable vs marginal vs loss-making?\n2. DISCOUNT DAMAGE — At what discount level does margin become unviable per product?\n3. GIFTED PRODUCTS — Total unrecovered COGS. Marketing investment or mistake?\n4. PRICING RECOMMENDATIONS — Which products need a price increase? By how much exactly?\n5. VARIANCE ANALYSIS — Where actual vs modelled > 5%, diagnose why.\n6. TOP 3 ACTIONS — Exact dollar impact, mechanism, timeline.\n\nUse exact figures. Be specific. Make it actionable.";
     navigator.clipboard.writeText(t);
-    setMsg("Copied to clipboard — paste into Claude");
+    setMsg("Copied — paste into Claude");
     setTimeout(()=>setMsg(""),4000);
   }
 
   const inp={background:S,border:"1px solid "+BR,color:TX,padding:"5px 8px",fontFamily:ff,fontSize:11,outline:"none",borderRadius:radius,width:"100%",boxSizing:"border-box"};
-  const thStyle={fontFamily:ff,fontSize:8,color:MU,fontWeight:"normal",letterSpacing:0.8,textTransform:"uppercase",whiteSpace:"nowrap",position:"relative",userSelect:"none",padding:"6px 8px 6px 6px",borderBottom:"2px solid "+BR,background:S2};
-  const tdStyle={padding:"6px 8px",fontFamily:ff,fontSize:11,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"};
+  const thStyle={fontFamily:ff,fontSize:8,color:MU,fontWeight:"normal",letterSpacing:0.8,textTransform:"uppercase",whiteSpace:"nowrap",position:"relative",userSelect:"none",padding:"7px 8px 7px 6px",borderBottom:"2px solid "+BR,background:S2};
+  const tdStyle={padding:"7px 8px",fontFamily:ff,fontSize:11,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"};
+
+  // Status badge component
+  const StatusBadge=({status})=>{
+    const col=status==="OK"?GR:status==="GIFTED"?RD:"#f59e0b";
+    const bg=status==="OK"?GR+"18":status==="GIFTED"?RD+"18":"#f59e0b18";
+    return <span style={{fontFamily:ff,fontSize:9,color:col,background:bg,padding:"2px 7px",borderRadius:10,fontWeight:"bold",letterSpacing:0.5}}>{status}</span>;
+  };
+
+  if(!fullPage&&!open) return(
+    <div onClick={()=>setOpen(true)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 14px",background:S2,border:"1px solid "+BR,borderRadius:6,cursor:"pointer",userSelect:"none"}}>
+      <span style={{fontFamily:ff,fontSize:10,color:MU,letterSpacing:2,textTransform:"uppercase"}}>Product Margin</span>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        {list.length>0&&<span style={{fontFamily:ff,fontSize:10,color:MU}}>{list.length} products · <span style={{color:blended>=target?GR:RD,fontWeight:"bold"}}>{blended.toFixed(1)}%</span> blended{(lowCount+giftedCount)>0&&<span style={{color:RD}}> · {lowCount+giftedCount} flagged</span>}</span>}
+        <span style={{fontFamily:ff,fontSize:10,color:MU}}>▼</span>
+      </div>
+    </div>
+  );
 
   return(
-    <div style={{marginBottom:16}}>
-      {/* Collapsible header */}
+    <div style={{border:fullPage?"none":"1px solid "+BR,borderRadius:fullPage?0:6,overflow:"hidden"}}>
+      {/* Header bar */}
       {!fullPage&&(
-        <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 14px",background:S2,border:"1px solid "+(open?A:BR),borderRadius:open?"6px 6px 0 0":"6px",cursor:"pointer",userSelect:"none"}}>
-          <span style={{fontFamily:ff,fontSize:10,color:open?A:MU,letterSpacing:2,textTransform:"uppercase"}}>Product Margin</span>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            {list.length>0&&<span style={{fontFamily:ff,fontSize:10,color:MU}}>{list.length} products · <span style={{color:blended>=target?GR:RD,fontWeight:"bold"}}>{blended.toFixed(1)}%</span> blended{flagCount>0&&<span style={{color:RD}}> · {flagCount} flagged</span>}</span>}
-            <span style={{fontFamily:ff,fontSize:10,color:MU}}>{open?"▲":"▼"}</span>
+        <div onClick={()=>setOpen(false)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 14px",background:S2,borderBottom:"1px solid "+BR,cursor:"pointer",userSelect:"none"}}>
+          <span style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:2,textTransform:"uppercase"}}>Product Margin</span>
+          <span style={{fontFamily:ff,fontSize:10,color:MU}}>▲</span>
+        </div>
+      )}
+
+      {/* ── INNER TAB NAV ── */}
+      <div style={{display:"flex",borderBottom:"1px solid "+BR,background:S2}}>
+        {[
+          {id:"overview",label:"📊 Overview"},
+          {id:"catalogue",label:"⚙️ Cost Inputs"},
+          {id:"analysis",label:"🔬 Deep Analysis"},
+          {id:"guide",label:"📖 Metrics Guide"},
+        ].map(t=>(
+          <button key={t.id} onClick={()=>setActiveTab(t.id)}
+            style={{padding:"10px 16px",background:"transparent",border:"none",borderBottom:activeTab===t.id?"2px solid "+A:"2px solid transparent",color:activeTab===t.id?A:MU,fontFamily:ff,fontSize:11,cursor:"pointer",letterSpacing:0.5,marginBottom:-1,whiteSpace:"nowrap"}}>
+            {t.label}
+          </button>
+        ))}
+        <div style={{flex:1}}/>
+        {/* Paste button always visible */}
+        <button onClick={()=>setShowPaste(s=>!s)}
+          style={{padding:"8px 16px",background:showPaste?A:"transparent",border:"none",borderBottom:showPaste?"2px solid "+A:"2px solid transparent",color:showPaste?"#fff":MU,fontFamily:ff,fontSize:11,cursor:"pointer",marginBottom:-1,letterSpacing:0.5}}>
+          {list.length?"↻ Update Data":"＋ Add Shopify Data"}
+        </button>
+      </div>
+
+      {/* Paste panel */}
+      {showPaste&&(
+        <div style={{padding:"14px 20px",background:S,borderBottom:"1px solid "+BR}}>
+          <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:8}}>
+            Paste your Shopify AI product margin report below (tab-separated). New data merges with existing.
+          </div>
+          <textarea value={raw} onChange={e=>setRaw(e.target.value)}
+            placeholder={"Product\tVariant\tUnits Sold\tGross Sales\tDiscounts\tReturns\tNet Sales\tCOGS/Unit\tTotal COGS\tGross Profit\tMargin %"}
+            rows={5} style={{...inp,fontFamily:"monospace",fontSize:11,resize:"vertical"}}/>
+          <div style={{display:"flex",gap:8,marginTop:8,alignItems:"center"}}>
+            <button onClick={applyPaste} style={{padding:"7px 20px",background:A,border:"none",color:"#fff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>LOAD DATA</button>
+            <button onClick={()=>{setShowPaste(false);setRaw("");}} style={{padding:"7px 14px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius}}>Cancel</button>
+            {list.length>0&&<button onClick={()=>{if(window.confirm("Clear all product data?"))onUpdate([]);setShowPaste(false);}} style={{padding:"7px 14px",background:"transparent",border:"1px solid "+RD+"66",color:RD,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius}}>Clear all</button>}
+            {msg&&<span style={{fontFamily:ff,fontSize:11,color:GR}}>{msg}</span>}
           </div>
         </div>
       )}
 
-      {(open||fullPage)&&(
-        <div style={{border:fullPage?"none":"1px solid "+BR,borderTop:"none",borderRadius:fullPage?0:"0 0 6px 6px"}}>
-
-          {/* ── SECTION 1: Shopify paste ── */}
-          <div style={{padding:"14px 16px",borderBottom:"1px solid "+BR+"44",background:S2}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:showPaste?10:0}}>
-              <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase"}}>
-                1 — Shopify Data
-                {list.length>0&&!showPaste&&<span style={{color:MU,fontSize:9,letterSpacing:0,textTransform:"none",marginLeft:10}}>{list.length} products loaded · {fmt(totalNet)} net · <span style={{color:blended>=target?GR:RD}}>{blended.toFixed(1)}% GM</span>{flagCount>0&&<span style={{color:RD}}> · {flagCount} flagged</span>}</span>}
-              </div>
-              <div style={{display:"flex",gap:6}}>
-                {list.length>0&&<button onClick={()=>{if(window.confirm("Clear all product data?"))onUpdate([]);}} style={{padding:"4px 10px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>Clear</button>}
-                <button onClick={()=>setShowPaste(s=>!s)} style={{padding:"4px 12px",background:showPaste?A:"transparent",border:"1px solid "+(showPaste?A:BR),color:showPaste?"#fff":MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>{list.length?"Update":"+ Paste"}</button>
-              </div>
+      {/* ── TAB: OVERVIEW ── */}
+      {activeTab==="overview"&&(
+        <div style={{padding:"20px"}}>
+          {list.length===0?(
+            <div style={{textAlign:"center",padding:"40px 20px"}}>
+              <div style={{fontSize:40,marginBottom:12}}>📦</div>
+              <div style={{fontFamily:ff,fontSize:14,color:TX,marginBottom:6}}>No product data loaded yet</div>
+              <div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:20}}>Click "＋ Add Shopify Data" above and paste your Shopify AI product margin report</div>
+              <button onClick={()=>setShowPaste(true)} style={{padding:"10px 24px",background:A,border:"none",color:"#fff",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>＋ Add Shopify Data</button>
             </div>
-            {showPaste&&(
-              <div>
-                <div style={{fontFamily:ff,fontSize:9,color:MU,marginBottom:5}}>Paste output from Shopify AI product margin report (tab-separated). New data merges with existing.</div>
-                <textarea value={raw} onChange={e=>setRaw(e.target.value)} placeholder={"Product\tVariant\tUnits Sold\tGross Sales\tDiscounts\tReturns\tNet Sales\tCOGS/Unit\tTotal COGS\tGross Profit\tMargin %"} rows={5}
-                  style={{...inp,fontFamily:"monospace",fontSize:11,resize:"vertical"}}/>
-                <div style={{display:"flex",gap:8,marginTop:6,alignItems:"center"}}>
-                  <button onClick={applyPaste} style={{padding:"6px 16px",background:A,border:"none",color:"#fff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>LOAD</button>
-                  <button onClick={()=>{setShowPaste(false);setRaw("");}} style={{padding:"6px 12px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius}}>Cancel</button>
-                  {msg&&<span style={{fontFamily:ff,fontSize:11,color:msg.includes("No")?RD:GR}}>{msg}</span>}
-                </div>
+          ):(
+            <div>
+              {/* Health summary cards */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:12,marginBottom:24}}>
+                {[
+                  {label:"Blended Margin",value:blended.toFixed(1)+"%",sub:"target: "+target+"%",color:blended>=target?GR:RD,big:true},
+                  {label:"Net Sales",value:fmt(totalNet),sub:list.length+" products",color:A,big:true},
+                  {label:"Gross Profit",value:fmt(totalGP),sub:totalGP>=0?"after all COGS":"loss",color:totalGP>=0?GR:RD,big:true},
+                  {label:"✅ On Target",value:okCount,sub:"products",color:GR,big:false},
+                  {label:"⚠️ Below Target",value:lowCount,sub:"need attention",color:lowCount>0?"#f59e0b":MU,big:false},
+                  {label:"🔴 Fully Gifted",value:giftedCount,sub:"COGS unrecovered",color:giftedCount>0?RD:MU,big:false},
+                ].map(({label,value,sub,color,big})=>(
+                  <div key={label} style={{background:S,border:"1px solid "+BR+"66",borderRadius:radius+2,padding:"14px 16px",borderTop:"3px solid "+color}}>
+                    <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:6}}>{label}</div>
+                    <div style={{fontFamily:ff,fontSize:big?22:28,color:color,fontWeight:"bold",lineHeight:1}}>{value}</div>
+                    <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:4}}>{sub}</div>
+                  </div>
+                ))}
               </div>
-            )}
-          </div>
 
-          {/* ── SECTION 2: Product Catalogue ── */}
-          {list.length>0&&(
-            <div style={{padding:"14px 16px",borderBottom:"1px solid "+BR+"44",background:S2}}>
-              <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase",marginBottom:8}}>
-                2 — Product Catalogue <span style={{color:MU,fontSize:9,fontWeight:"normal",letterSpacing:0,textTransform:"none"}}>click any row to edit · saves automatically</span>
-              </div>
-              <div style={{overflowX:"auto"}}>
-                <table style={{borderCollapse:"collapse",fontFamily:ff,fontSize:11,width:"100%"}}>
-                  <thead>
-                    <tr>
-                      {["Product","Pick & Pack","Packaging","Tariff %","Target GM%","Ship AU","Ship US","Ship Intl"].map(h=>(
-                        <th key={h} style={{...thStyle,textAlign:h==="Product"?"left":"center"}}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {list.map((p,i)=>{
-                      const c=catEntry(p.product);
-                      const isEdit=editCat===p.product;
-                      return(
-                        <tr key={i} style={{borderBottom:"1px solid "+BR+"22",background:isEdit?A+"11":i%2===0?"transparent":S+"33",cursor:"pointer"}} onClick={()=>setEditCat(isEdit?null:p.product)}>
-                          <td style={{...tdStyle,color:TX,maxWidth:180}}>{p.product}</td>
-                          {isEdit?(<>
-                            <td style={{padding:"3px 4px"}}><input type="number" value={c.pickPack} onChange={e=>saveCat(p.product,"pickPack",parseFloat(e.target.value)||0)} style={{...inp,width:64}} onClick={e=>e.stopPropagation()}/></td>
-                            <td style={{padding:"3px 4px"}}><select value={c.packagingType} onChange={e=>saveCat(p.product,"packagingType",e.target.value)} style={{...inp,width:80}} onClick={e=>e.stopPropagation()}><option value="satchel">Satchel</option><option value="giftbox">Gift Box</option><option value="poly">Polybag</option></select></td>
-                            <td style={{padding:"3px 4px"}}><input type="number" value={c.tariffPct} onChange={e=>saveCat(p.product,"tariffPct",parseFloat(e.target.value)||0)} style={{...inp,width:58}} onClick={e=>e.stopPropagation()}/></td>
-                            <td style={{padding:"3px 4px"}}><input type="number" value={c.targetMarginPct} onChange={e=>saveCat(p.product,"targetMarginPct",parseFloat(e.target.value)||0)} style={{...inp,width:58}} onClick={e=>e.stopPropagation()}/></td>
-                            <td style={{padding:"3px 4px"}}><input type="number" value={c.shippingAU} onChange={e=>saveCat(p.product,"shippingAU",parseFloat(e.target.value)||0)} style={{...inp,width:58}} onClick={e=>e.stopPropagation()}/></td>
-                            <td style={{padding:"3px 4px"}}><input type="number" value={c.shippingUS} onChange={e=>saveCat(p.product,"shippingUS",parseFloat(e.target.value)||0)} style={{...inp,width:58}} onClick={e=>e.stopPropagation()}/></td>
-                            <td style={{padding:"3px 4px"}}><input type="number" value={c.shippingIntl} onChange={e=>saveCat(p.product,"shippingIntl",parseFloat(e.target.value)||0)} style={{...inp,width:58}} onClick={e=>e.stopPropagation()}/></td>
-                          </>):(<>
-                            <td style={{...tdStyle,color:MU,textAlign:"center"}}>{c.pickPack>0?fmt(c.pickPack):<span style={{color:BR}}>—</span>}</td>
-                            <td style={{...tdStyle,color:MU,textAlign:"center",fontSize:10}}>{c.packagingType}</td>
-                            <td style={{...tdStyle,color:MU,textAlign:"center"}}>{c.tariffPct>0?c.tariffPct+"%":<span style={{color:BR}}>—</span>}</td>
-                            <td style={{...tdStyle,color:MU,textAlign:"center"}}>{c.targetMarginPct}%</td>
-                            <td style={{...tdStyle,color:MU,textAlign:"center"}}>{fmt(c.shippingAU)}</td>
-                            <td style={{...tdStyle,color:MU,textAlign:"center"}}>{fmt(c.shippingUS)}</td>
-                            <td style={{...tdStyle,color:MU,textAlign:"center"}}>{fmt(c.shippingIntl)}</td>
-                          </>)}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              {/* Quick product list — simple, scannable */}
+              <div style={{fontFamily:ff,fontSize:10,color:MU,letterSpacing:1.5,textTransform:"uppercase",marginBottom:10}}>All Products</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {enriched.sort((a,b)=>b.netSales-a.netSales).map((p,i)=>{
+                  const isExp=expandedProduct===p.product;
+                  return(
+                    <div key={i} style={{background:S,border:"1px solid "+(p.status==="OK"?BR+"44":p.status==="GIFTED"?RD+"33":"#f59e0b33"),borderRadius:radius+1,overflow:"hidden"}}>
+                      <div onClick={()=>setExpandedProduct(isExp?null:p.product)}
+                        style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",cursor:"pointer"}}>
+                        <StatusBadge status={p.status}/>
+                        <span style={{fontFamily:ff,fontSize:12,color:TX,flex:1,fontWeight:"500"}}>{p.product}</span>
+                        <span style={{fontFamily:ff,fontSize:10,color:MU}}>{p.units}u</span>
+                        <span style={{fontFamily:ff,fontSize:11,color:p.discRate>20?RD:MU,minWidth:50,textAlign:"right"}}>{p.discRate.toFixed(1)}% disc</span>
+                        <span style={{fontFamily:ff,fontSize:11,color:A,minWidth:72,textAlign:"right",fontWeight:"bold"}}>{fmt(p.netSales)}</span>
+                        <span style={{fontFamily:ff,fontSize:12,color:p.actualMargin>=(p.productTarget||target)?GR:RD,minWidth:50,textAlign:"right",fontWeight:"bold"}}>{p.netSales>0?pct(p.actualMargin):"GIFTED"}</span>
+                        {p.variants?.length>1&&<span style={{fontFamily:ff,fontSize:9,color:MU}}>{isExp?"▲":"▼"}</span>}
+                      </div>
+                      {isExp&&(
+                        <div style={{padding:"0 14px 12px",borderTop:"1px solid "+BR+"33"}}>
+                          {/* Key metrics for this product */}
+                          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10,marginBottom:p.variants?.length>1?12:0}}>
+                            {[
+                              {l:"Gross Sales",v:fmt(p.gross)},
+                              {l:"Discounts",v:"-"+fmt(p.discounts),c:p.discounts>0?RD:MU},
+                              {l:"COGS",v:fmt(p.totalCogs)},
+                              {l:"Gross Profit",v:fmt(p.grossProfit),c:p.grossProfit>=0?GR:RD},
+                              {l:"Model GM",v:p.avgRetail>0?pct(p.modelledMargin):"—",c:p.avgRetail>0?(p.modelledMargin>=(p.productTarget||target)?GR:RD):MU},
+                              {l:"Break-even",v:p.breakEven>0?fmt(p.breakEven):"—"},
+                              {l:"Max safe disc",v:p.discLevels?.find(d=>d.viable)?("@"+p.discLevels.filter(d=>d.viable).pop()?.disc+"%"):"None",c:p.discLevels?.some(d=>d.viable)?GR:RD},
+                            ].map(({l,v,c})=>(
+                              <div key={l} style={{background:S2,borderRadius:radius,padding:"6px 10px",minWidth:90}}>
+                                <div style={{fontFamily:ff,fontSize:8,color:MU,textTransform:"uppercase",letterSpacing:0.5,marginBottom:2}}>{l}</div>
+                                <div style={{fontFamily:ff,fontSize:12,color:c||TX,fontWeight:"bold"}}>{v}</div>
+                              </div>
+                            ))}
+                          </div>
+                          {/* Variants */}
+                          {p.variants?.length>1&&(
+                            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                              {p.variants.map((v,j)=>(
+                                <div key={j} style={{fontFamily:ff,fontSize:10,color:MU,background:S2,borderRadius:radius,padding:"4px 8px",border:"1px solid "+BR+"44"}}>
+                                  <span style={{color:TX,fontWeight:"bold",marginRight:5}}>{v.variant}</span>
+                                  <span>{v.units}u · </span>
+                                  <span style={{color:A}}>{fmt(v.netSales)}</span>
+                                  <span style={{marginLeft:6,color:v.discRate>20?RD:MU}}>{v.discRate.toFixed(1)}% disc</span>
+                                  <span style={{marginLeft:6,color:v.marginPct<(p.productTarget||target)?RD:GR,fontWeight:"bold"}}>{v.marginPct.toFixed(1)}%</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
+        </div>
+      )}
 
-          {/* ── SECTION 3: Analysis Table with full column controls ── */}
-          {list.length>0&&(
-            <div style={{background:S2}}>
-              {/* Table toolbar */}
-              <div style={{padding:"10px 16px",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",borderBottom:"1px solid "+BR+"44"}}>
-                <span style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase",marginRight:4}}>3 — Analysis</span>
+      {/* ── TAB: COST INPUTS (Catalogue) ── */}
+      {activeTab==="catalogue"&&(
+        <div style={{padding:"20px"}}>
+          <div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:16,lineHeight:1.7,background:S,border:"1px solid "+BR+"44",borderRadius:radius,padding:"12px 16px"}}>
+            <strong style={{color:TX}}>Set once, used everywhere.</strong> These costs are applied to every product to calculate contribution margin, break-even price, and discount viability. Click any row to edit.
+            <br/>Satchel cost is automatically pulled from your Fixed Costs section <strong style={{color:A}}>(currently {fmt(satchelPerOrder)} per order)</strong>.
+          </div>
+          {list.length===0?(
+            <div style={{fontFamily:ff,fontSize:12,color:MU,textAlign:"center",padding:"30px"}}>Load product data first using the "＋ Add Shopify Data" button above.</div>
+          ):(
+            <div style={{overflowX:"auto"}}>
+              <table style={{borderCollapse:"collapse",fontFamily:ff,fontSize:11,width:"100%"}}>
+                <thead>
+                  <tr style={{borderBottom:"2px solid "+BR}}>
+                    {[
+                      {h:"Product",hint:""},
+                      {h:"Pick & Pack ($)",hint:"Labour + materials per order"},
+                      {h:"Satchel Cost",hint:"Auto-filled from Fixed Costs"},
+                      {h:"US Tariff %",hint:"Import duty for US orders"},
+                      {h:"Target GM %",hint:"Your floor margin for this product"},
+                      {h:"Ship AU ($)",hint:"Avg domestic shipping cost"},
+                      {h:"Ship US ($)",hint:"Avg US shipping cost"},
+                      {h:"Ship Intl ($)",hint:"Avg international shipping cost"},
+                    ].map(({h,hint})=>(
+                      <th key={h} style={{...thStyle,textAlign:h==="Product"?"left":"center",borderBottom:"2px solid "+BR}}>
+                        <div>{h}</div>
+                        {hint&&<div style={{fontSize:7,color:MU,fontWeight:"normal",marginTop:1,letterSpacing:0,textTransform:"none"}}>{hint}</div>}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.map((p,i)=>{
+                    const c=catEntry(p.product);
+                    const isEdit=editCat===p.product;
+                    return(
+                      <tr key={i} style={{borderBottom:"1px solid "+BR+"22",background:isEdit?A+"0d":i%2===0?"transparent":S+"33",cursor:"pointer",transition:"background 0.1s"}}
+                        onClick={()=>setEditCat(isEdit?null:p.product)}>
+                        <td style={{...tdStyle,color:TX,maxWidth:200,fontWeight:"500"}}>{p.product}</td>
+                        {isEdit?(<>
+                          <td style={{padding:"4px 6px"}}><input type="number" value={c.pickPack} onChange={e=>saveCat(p.product,"pickPack",parseFloat(e.target.value)||0)} style={{...inp,width:70}} onClick={e=>e.stopPropagation()}/></td>
+                          <td style={{...tdStyle,color:MU,textAlign:"center",fontSize:10,fontStyle:"italic"}}>{fmt(satchelPerOrder)}<div style={{fontSize:8,color:MU}}>from Fixed Costs</div></td>
+                          <td style={{padding:"4px 6px"}}><input type="number" value={c.tariffPct} onChange={e=>saveCat(p.product,"tariffPct",parseFloat(e.target.value)||0)} style={{...inp,width:60}} onClick={e=>e.stopPropagation()}/></td>
+                          <td style={{padding:"4px 6px"}}><input type="number" value={c.targetMarginPct} onChange={e=>saveCat(p.product,"targetMarginPct",parseFloat(e.target.value)||0)} style={{...inp,width:60}} onClick={e=>e.stopPropagation()}/></td>
+                          <td style={{padding:"4px 6px"}}><input type="number" value={c.shippingAU} onChange={e=>saveCat(p.product,"shippingAU",parseFloat(e.target.value)||0)} style={{...inp,width:60}} onClick={e=>e.stopPropagation()}/></td>
+                          <td style={{padding:"4px 6px"}}><input type="number" value={c.shippingUS} onChange={e=>saveCat(p.product,"shippingUS",parseFloat(e.target.value)||0)} style={{...inp,width:60}} onClick={e=>e.stopPropagation()}/></td>
+                          <td style={{padding:"4px 6px"}}><input type="number" value={c.shippingIntl} onChange={e=>saveCat(p.product,"shippingIntl",parseFloat(e.target.value)||0)} style={{...inp,width:60}} onClick={e=>e.stopPropagation()}/></td>
+                        </>):(<>
+                          <td style={{...tdStyle,color:c.pickPack>0?TX:MU,textAlign:"center"}}>{c.pickPack>0?fmt(c.pickPack):<span style={{color:BR,fontSize:10}}>not set</span>}</td>
+                          <td style={{...tdStyle,color:MU,textAlign:"center",fontStyle:"italic",fontSize:10}}>{fmt(satchelPerOrder)}</td>
+                          <td style={{...tdStyle,color:c.tariffPct>0?TX:MU,textAlign:"center"}}>{c.tariffPct>0?c.tariffPct+"%":<span style={{color:BR,fontSize:10}}>—</span>}</td>
+                          <td style={{...tdStyle,color:TX,textAlign:"center",fontWeight:"bold"}}>{c.targetMarginPct}%</td>
+                          <td style={{...tdStyle,color:MU,textAlign:"center"}}>{fmt(c.shippingAU)}</td>
+                          <td style={{...tdStyle,color:MU,textAlign:"center"}}>{fmt(c.shippingUS)}</td>
+                          <td style={{...tdStyle,color:MU,textAlign:"center"}}>{fmt(c.shippingIntl)}</td>
+                        </>)}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── TAB: DEEP ANALYSIS ── */}
+      {activeTab==="analysis"&&(
+        <div>
+          {list.length===0?(
+            <div style={{textAlign:"center",padding:"40px 20px"}}>
+              <div style={{fontSize:40,marginBottom:12}}>🔬</div>
+              <div style={{fontFamily:ff,fontSize:14,color:TX,marginBottom:6}}>No data to analyse yet</div>
+              <div style={{fontFamily:ff,fontSize:12,color:MU}}>Load product data first</div>
+            </div>
+          ):(
+            <div>
+              {/* Toolbar */}
+              <div style={{padding:"10px 16px",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",borderBottom:"1px solid "+BR+"44",background:S2}}>
                 <span style={{fontFamily:ff,fontSize:10,color:MU}}>{sorted.length}/{enriched.length} products</span>
                 <div style={{flex:1}}/>
-                {/* Filter toggle */}
-                <button onClick={()=>setShowFilters(f=>!f)} style={{padding:"4px 10px",background:showFilters?A:"transparent",border:"1px solid "+(showFilters?A:BR),color:showFilters?"#fff":MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
+                <button onClick={()=>setShowFilters(f=>!f)} style={{padding:"4px 10px",background:showFilters?A+"22":"transparent",border:"1px solid "+(showFilters?A:BR),color:showFilters?A:MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
                   {Object.values(filters).some(v=>v)?"Filters ●":"Filters"}
                 </button>
-                {Object.values(filters).some(v=>v)&&<button onClick={()=>setFilters({})} style={{padding:"4px 10px",background:"transparent",border:"1px solid "+BR,color:RD,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius}}>Clear filters</button>}
-                <button onClick={()=>setColOrder(null)} title="Reset column order" style={{padding:"4px 10px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>Reset cols</button>
-                {msg&&<span style={{fontFamily:ff,fontSize:11,color:GR}}>{msg}</span>}
+                {Object.values(filters).some(v=>v)&&<button onClick={()=>setFilters({})} style={{padding:"4px 10px",background:"transparent",border:"1px solid "+BR,color:RD,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius}}>Clear</button>}
+                <button onClick={()=>setColOrder(null)} style={{padding:"4px 10px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius}}>Reset cols</button>
               </div>
-
-              {/* Filter row */}
               {showFilters&&(
                 <div style={{padding:"8px 16px",display:"flex",gap:6,flexWrap:"wrap",borderBottom:"1px solid "+BR+"44",background:S}}>
                   {activeCols.filter(c=>c.filterable).map(col=>(
                     <div key={col.id} style={{display:"flex",flexDirection:"column",gap:2}}>
                       <span style={{fontFamily:ff,fontSize:8,color:MU,letterSpacing:0.7,textTransform:"uppercase"}}>{getColLabel(col.id)}</span>
                       <input value={filters[col.id]||""} onChange={e=>setFilters(f=>({...f,[col.id]:e.target.value}))}
-                        placeholder="filter…"
-                        style={{background:S2,border:"1px solid "+BR,color:TX,padding:"4px 8px",fontFamily:ff,fontSize:11,outline:"none",borderRadius:radius,width:120}}/>
+                        placeholder="filter…" style={{background:S2,border:"1px solid "+BR,color:TX,padding:"4px 8px",fontFamily:ff,fontSize:11,outline:"none",borderRadius:radius,width:120}}/>
                     </div>
                   ))}
                 </div>
               )}
-
-              {/* The table */}
               <div style={{overflowX:"auto"}}>
-                <table style={{borderCollapse:"collapse",fontFamily:ff,tableLayout:"fixed"}}>
-                  <colgroup>
-                    {activeCols.map(col=><col key={col.id} style={{width:getColWidth(col.id)}}/>)}
-                  </colgroup>
+                <table style={{borderCollapse:"collapse",fontFamily:ff,tableLayout:"fixed",minWidth:"100%"}}>
+                  <colgroup>{activeCols.map(col=><col key={col.id} style={{width:getColWidth(col.id)}}/>)}</colgroup>
                   <thead>
                     <tr>
                       {activeCols.map(col=>(
-                        <th key={col.id}
-                          draggable
-                          onDragStart={e=>onDragStart(e,col.id)}
-                          onDragOver={e=>onDragOver(e,col.id)}
-                          onDrop={e=>onDrop(e,col.id)}
+                        <th key={col.id} draggable onDragStart={e=>onDragStart(e,col.id)} onDragOver={e=>onDragOver(e,col.id)} onDrop={e=>onDrop(e,col.id)}
                           style={{...thStyle,width:getColWidth(col.id),background:dragOver===col.id?A+"22":S2,outline:dragCol===col.id?"1px dashed "+A:"none"}}>
                           <div style={{display:"flex",alignItems:"center",gap:3,overflow:"hidden"}}>
-                            {/* Rename on double-click */}
                             {editingColName===col.id?(
                               <input autoFocus defaultValue={getColLabel(col.id)}
                                 onBlur={e=>{setColNames(n=>({...n,[col.id]:e.target.value||DEFAULT_COLS.find(c=>c.id===col.id)?.label}));setEditingColName(null);}}
@@ -1665,15 +1709,11 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                                 onClick={()=>col.sortable&&toggleSort(col.id)}
                                 style={{cursor:col.sortable?"pointer":"default",flex:1,overflow:"hidden",textOverflow:"ellipsis"}}
                                 title="Double-click to rename · Drag to reorder">
-                                {getColLabel(col.id)}
-                                {col.sortable&&sortCol===col.id&&<span style={{marginLeft:3}}>{sortDir==="asc"?"↑":"↓"}</span>}
+                                {getColLabel(col.id)}{col.sortable&&sortCol===col.id&&<span style={{marginLeft:3}}>{sortDir==="asc"?"↑":"↓"}</span>}
                               </span>
                             )}
-                            {/* Resize handle */}
-                            <span onMouseDown={e=>startResize(e,col.id)}
-                              style={{position:"absolute",right:0,top:0,bottom:0,width:4,cursor:"col-resize",background:"transparent"}}
-                              onMouseEnter={e=>e.currentTarget.style.background=A+"66"}
-                              onMouseLeave={e=>e.currentTarget.style.background="transparent"}/>
+                            <span onMouseDown={e=>startResize(e,col.id)} style={{position:"absolute",right:0,top:0,bottom:0,width:4,cursor:"col-resize",background:"transparent"}}
+                              onMouseEnter={e=>e.currentTarget.style.background=A+"66"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}/>
                           </div>
                         </th>
                       ))}
@@ -1685,13 +1725,10 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                         <tr style={{borderBottom:"1px solid "+BR+"22",background:i%2===0?"transparent":S+"33",cursor:"pointer"}}
                           onClick={()=>setExpandedProduct(expandedProduct===row.product?null:row.product)}>
                           {activeCols.map(col=>(
-                            <td key={col.id} style={{...tdStyle,color:getCellColor(row,col.id),textAlign:col.id==="product"?"left":"right",fontWeight:["actualMargin","contribMargin","status"].includes(col.id)?"bold":"normal",maxWidth:getColWidth(col.id)}}>
+                            <td key={col.id} style={{...tdStyle,color:getCellColor(row,col.id),textAlign:col.id==="product"?"left":"right",fontWeight:["actualMargin","contribMargin"].includes(col.id)?"bold":"normal",maxWidth:getColWidth(col.id)}}>
                               {col.id==="product"?(
-                                <span>
-                                  {row.variants?.length>1&&<span style={{fontSize:8,color:MU,marginRight:4}}>{expandedProduct===row.product?"▼":"▶"}</span>}
-                                  {getCellVal(row,col.id)}
-                                </span>
-                              ):getCellVal(row,col.id)}
+                                <span><span style={{fontSize:8,color:MU,marginRight:4}}>{row.variants?.length>1?(expandedProduct===row.product?"▼":"▶"):""}</span>{getCellVal(row,col.id)}</span>
+                              ):col.id==="status"?<StatusBadge status={row.status}/>:getCellVal(row,col.id)}
                             </td>
                           ))}
                         </tr>
@@ -1701,7 +1738,7 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                               <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
                                 {row.variants.map((v,j)=>(
                                   <div key={j} style={{fontFamily:ff,fontSize:10,color:MU,background:S2,borderRadius:radius,padding:"4px 8px",border:"1px solid "+BR+"44"}}>
-                                    <span style={{color:TX,marginRight:6,fontWeight:"bold"}}>{v.variant}</span>
+                                    <span style={{color:TX,marginRight:5,fontWeight:"bold"}}>{v.variant}</span>
                                     <span>{v.units}u</span>
                                     <span style={{marginLeft:8,color:A}}>{fmt(v.netSales)}</span>
                                     <span style={{marginLeft:8,color:v.discRate>20?RD:MU}}>{v.discRate.toFixed(1)}% disc</span>
@@ -1717,7 +1754,7 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                   </tbody>
                   <tfoot>
                     <tr style={{borderTop:"2px solid "+BR,background:S2}}>
-                      {activeCols.map((col,i)=>(
+                      {activeCols.map(col=>(
                         <td key={col.id} style={{...tdStyle,fontWeight:"bold",textAlign:col.id==="product"?"left":"right"}}>
                           {col.id==="product"?"TOTAL / BLENDED":
                            col.id==="units"?enriched.reduce((s,p)=>s+p.units,0):
@@ -1725,46 +1762,44 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                            col.id==="netSales"?<span style={{color:A}}>{fmt(totalNet)}</span>:
                            col.id==="totalCogs"?fmt(enriched.reduce((s,p)=>s+p.totalCogs,0)):
                            col.id==="grossProfit"?<span style={{color:totalGP>=0?GR:RD}}>{fmt(totalGP)}</span>:
-                           col.id==="actualMargin"||col.id==="contribMargin"?<span style={{color:blended>=target?GR:RD}}>{blended.toFixed(1)}%</span>:
-                           ""}
+                           col.id==="actualMargin"||col.id==="contribMargin"?<span style={{color:blended>=target?GR:RD}}>{blended.toFixed(1)}%</span>:""}
                         </td>
                       ))}
                     </tr>
                   </tfoot>
                 </table>
               </div>
-              <div style={{padding:"6px 16px 10px",fontFamily:ff,fontSize:9,color:MU}}>
-                Sort: click column header · Rename: double-click header · Resize: drag right edge · Reorder: drag column · Filter: use Filters button
-              </div>
+              <div style={{padding:"6px 16px 10px",fontFamily:ff,fontSize:9,color:MU}}>Sort: click header · Rename: double-click · Resize: drag right edge · Reorder: drag column</div>
             </div>
           )}
+        </div>
+      )}
 
-          {/* ── SECTION 4: Metrics Guide ── */}
-          {list.length>0&&<MetricsGuide target={target}/>}
+      {/* ── TAB: METRICS GUIDE ── */}
+      {activeTab==="guide"&&<MetricsGuide target={target}/>}
 
-          {/* ── Export Buttons ── */}
-          {list.length>0&&(
-            <div style={{display:"flex",gap:12,padding:"20px 16px",borderTop:"1px solid "+BR+"44",background:S2}}>
-              <button onClick={exportCSV}
-                style={{flex:1,padding:"14px 0",background:"transparent",border:"1px solid "+BR,color:TX,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-                <span style={{fontSize:18,lineHeight:1}}>↓</span>
-                <span>Download CSV</span>
-                <span style={{fontSize:9,color:MU,letterSpacing:0.5,textTransform:"none"}}>current view, filtered &amp; sorted</span>
-              </button>
-              <button onClick={exportText}
-                style={{flex:1,padding:"14px 0",background:A+"11",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-                <span style={{fontSize:18,lineHeight:1}}>✦</span>
-                <span>Copy for Claude</span>
-                <span style={{fontSize:9,color:MU,letterSpacing:0.5,textTransform:"none"}}>full margin analysis + prompt</span>
-              </button>
-              {msg&&<span style={{fontFamily:ff,fontSize:11,color:GR,alignSelf:"center"}}>{msg}</span>}
-            </div>
-          )}
+      {/* ── Export buttons (always at bottom when data loaded) ── */}
+      {list.length>0&&(
+        <div style={{display:"flex",gap:12,padding:"16px 20px",borderTop:"1px solid "+BR+"44",background:S2}}>
+          <button onClick={exportCSV}
+            style={{flex:1,padding:"13px 0",background:"transparent",border:"1px solid "+BR,color:TX,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,letterSpacing:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+            <span style={{fontSize:16}}>↓</span>
+            <span style={{fontWeight:"bold"}}>Download CSV</span>
+            <span style={{fontSize:9,color:MU}}>current view, filtered &amp; sorted</span>
+          </button>
+          <button onClick={exportText}
+            style={{flex:1,padding:"13px 0",background:A+"11",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,letterSpacing:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+            <span style={{fontSize:16}}>✦</span>
+            <span style={{fontWeight:"bold"}}>Copy for Claude</span>
+            <span style={{fontSize:9,color:MU}}>full analysis + prompt</span>
+          </button>
+          {msg&&<span style={{fontFamily:ff,fontSize:11,color:GR,alignSelf:"center"}}>{msg}</span>}
         </div>
       )}
     </div>
   );
 }
+
 // ─── Confirm Modal ────────────────────────────────────────────────────────────
 function ConfirmModal({message,onConfirm,onCancel}){
   const {BG,S2,BR,A,RD,MU,TX,ff,radius}=useTheme();
@@ -3317,7 +3352,7 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts}){
 
 // ─── Targets Page ─────────────────────────────────────────────────────────────
 // ─── Margin Analysis Page ─────────────────────────────────────────────────────
-function MarginAnalysisPage({productMarginData,productCatalogue,onProductMarginUpdate,onProductCatalogueUpdate,targetMargin}){
+function MarginAnalysisPage({productMarginData,productCatalogue,onProductMarginUpdate,onProductCatalogueUpdate,targetMargin,satchelCost}){
   return(
     <div>
       <ProductMarginImport
@@ -3326,6 +3361,7 @@ function MarginAnalysisPage({productMarginData,productCatalogue,onProductMarginU
         onUpdate={onProductMarginUpdate}
         onCatalogueUpdate={onProductCatalogueUpdate}
         targetMargin={targetMargin||55}
+        satchelCost={satchelCost}
         fullPage
       />
     </div>
@@ -3908,6 +3944,7 @@ function App(){
                 onProductMarginUpdate={updateProductMargin}
                 onProductCatalogueUpdate={updateProductCatalogue}
                 targetMargin={curWeeks[0]?.weekTargets?.gross_margin_target||55}
+                satchelCost={fixed?.satchelCostDefault||"0.85"}
               />
             </div>
           )}
