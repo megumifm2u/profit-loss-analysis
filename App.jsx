@@ -375,19 +375,58 @@ function calcMonth(weeks,fixed,extras,opexKeys,depts){
 }
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
+const PASSWORD=import.meta.env.VITE_PASSWORD;
 const JSONBIN_ID=import.meta.env.VITE_JSONBIN_ID;
 const JSONBIN_KEY=import.meta.env.VITE_JSONBIN_KEY;
-const PASSWORD=import.meta.env.VITE_PASSWORD;
+const SUPABASE_URL="https://bpnlfbrkkwgrturkycpe.supabase.co";
+const SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJwbmxmYnJra3dncnR1cmt5Y3BlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI2OTg2MjksImV4cCI6MjA4ODI3NDYyOX0.yxA6PXuVoSzQHNdZKvwssBJRQOfV4hjEHRaS9HS8-GE";
+
+async function loadFromSupabase(){
+  try{
+    const res=await fetch(SUPABASE_URL+"/rest/v1/pl_data?id=eq.main&select=data",{
+      headers:{"apikey":SUPABASE_KEY,"Authorization":"Bearer "+SUPABASE_KEY}
+    });
+    if(!res.ok)return null;
+    const rows=await res.json();
+    if(rows&&rows[0]&&rows[0].data&&Object.keys(rows[0].data).length>0)return rows[0].data;
+    return null;
+  }catch(e){console.warn("Supabase load failed",e);return null;}
+}
+
+async function saveToSupabase(payload){
+  try{
+    await fetch(SUPABASE_URL+"/rest/v1/pl_data?id=eq.main",{
+      method:"PATCH",
+      headers:{"apikey":SUPABASE_KEY,"Authorization":"Bearer "+SUPABASE_KEY,"Content-Type":"application/json","Prefer":"return=minimal"},
+      body:JSON.stringify({data:payload,updated_at:new Date().toISOString()})
+    });
+  }catch(e){console.warn("Supabase save failed",e);}
+}
 
 async function loadAll(){
+  // 1. Try JSONBin (existing data)
   if(JSONBIN_ID&&JSONBIN_KEY){
     try{
       const res=await fetch("https://api.jsonbin.io/v3/b/"+JSONBIN_ID+"/latest",{headers:{"X-Master-Key":JSONBIN_KEY}});
-      const d=await res.json();
-      if(d.record)return{monthData:d.record.monthData||{},fixed:d.record.fixed||null,settings:d.record.settings||null};
+      if(res.ok){
+        const d=await res.json();
+        if(d.record&&(d.record.monthData||d.record.fixed)){
+          // Mirror to Supabase and localStorage so data is available when JSONBin dies
+          const payload={monthData:d.record.monthData||{},fixed:d.record.fixed||null,settings:d.record.settings||null};
+          saveToSupabase(payload);
+          try{localStorage.setItem("pl_v6",JSON.stringify(payload));}catch(e){}
+          return payload;
+        }
+      }
     }catch(e){console.warn("JSONBin load failed",e);}
   }
-  // Try both storage keys (migration from older versions)
+  // 2. Try Supabase
+  const sb=await loadFromSupabase();
+  if(sb&&(sb.monthData||sb.fixed)){
+    try{localStorage.setItem("pl_v6",JSON.stringify(sb));}catch(e){}
+    return sb;
+  }
+  // 3. Fall back to localStorage
   for(const key of["pl_v6","pl_v5","pl_v4"]){
     try{const loc=localStorage.getItem(key);if(loc)return JSON.parse(loc);}catch(e){}
   }
@@ -396,12 +435,16 @@ async function loadAll(){
 
 async function saveAll(monthData,fixed,settings){
   const payload={monthData,fixed,settings};
+  // Always save to localStorage first (instant, never fails)
   try{localStorage.setItem("pl_v6",JSON.stringify(payload));}catch(e){}
-  if(!JSONBIN_ID||!JSONBIN_KEY)return;
-  try{
-    const res=await fetch("https://api.jsonbin.io/v3/b/"+JSONBIN_ID,{method:"PUT",headers:{"Content-Type":"application/json","X-Master-Key":JSONBIN_KEY},body:JSON.stringify(payload)});
-    if(!res.ok)console.warn("JSONBin save failed",res.status);
-  }catch(e){console.warn("JSONBin save error",e);}
+  // Save to Supabase (primary cloud)
+  await saveToSupabase(payload);
+  // Also try JSONBin while it still works
+  if(JSONBIN_ID&&JSONBIN_KEY){
+    try{
+      await fetch("https://api.jsonbin.io/v3/b/"+JSONBIN_ID,{method:"PUT",headers:{"Content-Type":"application/json","X-Master-Key":JSONBIN_KEY},body:JSON.stringify(payload)});
+    }catch(e){}
+  }
 }
 
 // ─── Shopify Parser ───────────────────────────────────────────────────────────
