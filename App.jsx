@@ -378,27 +378,23 @@ function calcMonth(weeks,fixed,extras,opexKeys,depts){
 const PASSWORD=import.meta.env.VITE_PASSWORD;
 const JSONBIN_ID=import.meta.env.VITE_JSONBIN_ID;
 const JSONBIN_KEY=import.meta.env.VITE_JSONBIN_KEY;
-const SUPABASE_URL="https://bpnlfbrkkwgrturkycpe.supabase.co";
-const SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJwbmxmYnJra3dncnR1cmt5Y3BlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI2OTg2MjksImV4cCI6MjA4ODI3NDYyOX0.yxA6PXuVoSzQHNdZKvwssBJRQOfV4hjEHRaS9HS8-GE";
 
 async function loadFromSupabase(){
   try{
-    const res=await fetch(SUPABASE_URL+"/rest/v1/pl_data?id=eq.main&select=data",{
-      headers:{"apikey":SUPABASE_KEY,"Authorization":"Bearer "+SUPABASE_KEY}
-    });
+    const res=await fetch("/api/data");
     if(!res.ok)return null;
-    const rows=await res.json();
-    if(rows&&rows[0]&&rows[0].data&&Object.keys(rows[0].data).length>0)return rows[0].data;
+    const d=await res.json();
+    if(d&&Object.keys(d).length>0)return d;
     return null;
   }catch(e){console.warn("Supabase load failed",e);return null;}
 }
 
 async function saveToSupabase(payload){
   try{
-    await fetch(SUPABASE_URL+"/rest/v1/pl_data?id=eq.main",{
-      method:"PATCH",
-      headers:{"apikey":SUPABASE_KEY,"Authorization":"Bearer "+SUPABASE_KEY,"Content-Type":"application/json","Prefer":"return=minimal"},
-      body:JSON.stringify({data:payload,updated_at:new Date().toISOString()})
+    await fetch("/api/data",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(payload)
     });
   }catch(e){console.warn("Supabase save failed",e);}
 }
