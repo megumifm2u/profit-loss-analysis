@@ -135,7 +135,9 @@ const DEFAULT_DISC_BUCKETS = [
 
 // ─── OPEX / Wage defaults ─────────────────────────────────────────────────────
 const DEFAULT_OPEX_KEYS = [
-  {key:"auspost",label:"AusPost",group:"freight"},
+  {key:"auspost",label:"AusPost (Total)",group:"freight",computed:true},
+  {key:"auspost_domestic",label:"AusPost Domestic",group:"freight",sub:true,parent:"auspost"},
+  {key:"auspost_intl",label:"AusPost International",group:"freight",sub:true,parent:"auspost"},
   {key:"fedex",label:"FedEx / International",group:"freight"},
   {key:"customs_duties",label:"Customs and Duties",group:"freight"},
   {key:"collab_shipping",label:"Collab Shipping",group:"collabs"},
@@ -291,11 +293,23 @@ function calcWeek(week,fixed,opexKeys,depts){
 
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const getO=k=>{
+    // For computed parent keys (e.g. auspost), sum sub-keys if they exist
+    const keyDef=keys.find(kd=>kd.key===k);
+    if(keyDef?.computed){
+      const subKeys=keys.filter(kd=>kd.parent===k);
+      const subSum=subKeys.reduce((s,kd)=>{
+        if(week.opex?.[kd.key]!==""&&week.opex?.[kd.key]!==undefined)return s+n(week.opex[kd.key]);
+        if(fixed?.fixedKeys?.includes(kd.key))return s+n(fixed?.values?.[kd.key]);
+        return s;
+      },0);
+      if(subSum>0)return subSum;
+    }
     if(week.opex?.[k]!==""&&week.opex?.[k]!==undefined)return n(week.opex[k]);
     if(fixed?.fixedKeys?.includes(k))return n(fixed?.values?.[k]);
     return 0;
   };
-  const totalOPEXBase=keys.reduce((s,{key})=>s+getO(key),0);
+  // Exclude sub-keys from totals (they roll up into parent computed key)
+  const totalOPEXBase=keys.filter(k=>!k.sub).reduce((s,{key})=>s+getO(key),0);
   // Marketing discount reclassified as marketing expense
   const totalOPEX=totalOPEXBase+dr.marketingDisc;
 
@@ -303,7 +317,7 @@ function calcWeek(week,fixed,opexKeys,depts){
   // Staff discount reclassified as wages/staff benefit
   const totalWages=allWageKeys(wDepts).reduce((s,k)=>s+n(week.wages?.[k]||0),0)+dr.staffDisc;
 
-  const totalFreight=keys.filter(k=>k.group==="freight").reduce((s,{key})=>s+getO(key),0);
+  const totalFreight=keys.filter(k=>k.group==="freight"&&!k.sub).reduce((s,{key})=>s+getO(key),0);
   const totalCollabs=keys.filter(k=>k.group==="collabs").reduce((s,{key})=>s+getO(key),0);
 
   const totalExpenses=totalCOGS+totalOPEX+totalWages;
@@ -411,6 +425,10 @@ function parseShopify(raw){
       const v=getNum(line); if(v!==null)cogs.other_packaging=v;
 
     // ── OPEX: Freight ───────────────────────────────────────────────────────
+    } else if(low.includes("auspost domestic")||low.includes("aus post domestic")||low.includes("australia post domestic")||(low.includes("auspost")&&low.includes("domestic"))){
+      const v=getNum(line); if(v!==null)opex.auspost_domestic=v;
+    } else if(low.includes("auspost intl")||low.includes("auspost international")||low.includes("aus post international")||low.includes("australia post international")||(low.includes("auspost")&&low.includes("intl"))){
+      const v=getNum(line); if(v!==null)opex.auspost_intl=v;
     } else if(low.includes("auspost")||low.includes("aus post")||(low.includes("australia post"))){
       const v=getNum(line); if(v!==null)opex.auspost=v;
     } else if(low.includes("fedex")||low.includes("fed ex")||low.includes("international freight")||low.includes("dhl")||low.includes("ups")){
@@ -925,7 +943,32 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
       <div style={{paddingLeft:16,borderLeft:"2px solid "+A+"22",marginTop:10}}>
         <SH sub><E value={labels.sec_freight} onSave={v=>labels._save("sec_freight",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
         <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_freight_sub} onSave={v=>labels._save("sec_freight_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
-        <Grid>{freightKeys.map(({key,label})=>opexField(key,label))}</Grid>
+        {/* AusPost: domestic + international calculator */}
+        {(()=>{
+          const dom=n(week.opex?.auspost_domestic||0);
+          const intl=n(week.opex?.auspost_intl||0);
+          const total=dom+intl||n(week.opex?.auspost||0);
+          return(
+            <div style={{background:S2,border:"1px solid "+BR+"88",borderRadius:radius+1,padding:"12px 14px",marginBottom:10}}>
+              <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase",marginBottom:10}}>AusPost (Total: {fmtD(total)})</div>
+              <Grid>
+                <Fld label={<span style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:0.8}}>Domestic</span>}>
+                  <CI value={week.opex?.auspost_domestic||""} onChange={v=>{
+                    const newDom=n(v); const newIntl=n(week.opex?.auspost_intl||0);
+                    onChange({...week,opex:{...week.opex,auspost_domestic:v,auspost_intl:week.opex?.auspost_intl||"",auspost:""}});
+                  }}/>
+                </Fld>
+                <Fld label={<span style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:0.8}}>International</span>}>
+                  <CI value={week.opex?.auspost_intl||""} onChange={v=>{
+                    onChange({...week,opex:{...week.opex,auspost_intl:v,auspost_domestic:week.opex?.auspost_domestic||"",auspost:""}});
+                  }}/>
+                </Fld>
+              </Grid>
+              {(dom>0||intl>0)&&<div style={{fontFamily:ff,fontSize:11,color:A,marginTop:8}}>Total AusPost: {fmtD(dom+intl)}</div>}
+            </div>
+          );
+        })()}
+        <Grid>{freightKeys.filter(k=>!k.sub&&!k.computed&&k.key!=="auspost").map(({key,label})=>opexField(key,label))}</Grid>
         <Row><Badge small label="Total Freight" value={-c.totalFreight} color={RD}/></Row>
 
         <SH sub><E value={labels.sec_collabs} onSave={v=>labels._save("sec_collabs",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
@@ -1376,6 +1419,8 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
   const [staff,setStaff]=useState(settings?.staff||DEFAULT_STAFF);
   const [targets,setTargets]=useState(labels?._targets||DEFAULT_TARGETS);
   const [saved,setSaved]=useState(false);
+  // Keep targets in sync when labels (loaded from storage) update
+  useEffect(()=>{if(labels?._targets)setTargets({...DEFAULT_TARGETS,...labels._targets});},[labels?._targets]);
   const apply=()=>{onThemeChange(themeEdit);setSaved(true);setTimeout(()=>setSaved(false),2000);};
   const reset=()=>{setThemeEdit({...DEFAULT_THEME});onThemeChange({...DEFAULT_THEME});};
   const updateStaff=ns=>{setStaff(ns);onSettingsChange({...settings,staff:ns});};
