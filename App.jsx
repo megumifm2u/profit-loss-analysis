@@ -1704,10 +1704,11 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
 
 // ─── Monthly Overview ─────────────────────────────────────────────────────────
 function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opexKeys,depts,labels,monthKey}){
-  const {S2,BR,A,MU,TX,ff,RD,GR,radius}=useTheme();
+  const {S,S2,BR,A,MU,TX,ff,RD,GR,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   const mc=calcMonth(weeks,fixed,extras,keys,wDepts);
+  const monthDateRange=weeks.length>0?weeks[0].dateRange.split(" - ")[0]+" — "+weeks[weeks.length-1].dateRange.split(" - ")[1]:"";
   const [part2,setPart2]=useState(false);
   const [sumCopied,setSumCopied]=useState(false);
 
@@ -1766,14 +1767,14 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
                 {label:"Staff Benefits (→ Wages)",val:totalDR.staffDisc,col:A,sub:"reclassified as staff benefit"},
                 {label:"True Promotional (→ Revenue Deduction)",val:totalDR.promoDisc,col:GR,sub:"this is the only bucket reducing Net Revenue"},
               ].map(({label,val,col,sub})=>(
-                <div key={label} style={{background:"#12111a",border:"1px solid "+col+"44",borderRadius:radius+1,padding:"12px 14px"}}>
+                <div key={label} style={{background:S2,border:"1px solid "+col+"44",borderRadius:radius+1,padding:"12px 14px"}}>
                   <div style={{fontFamily:ff,fontSize:10,color:col,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>{label}</div>
                   <div style={{fontFamily:ff,fontSize:18,color:col,fontWeight:"bold"}}>{fmtD(val)}</div>
                   <div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:4}}>{sub}</div>
                 </div>
               ))}
             </div>
-            <div style={{fontFamily:ff,fontSize:12,color:MU,padding:"10px 14px",background:"#1a1826",borderRadius:radius+1,borderLeft:"3px solid "+A}}>
+            <div style={{fontFamily:ff,fontSize:12,color:MU,padding:"10px 14px",background:S2,borderRadius:radius+1,borderLeft:"3px solid "+A}}>
               Without reclassification your Net Revenue would have been reduced by {fmtD(totalDR.serviceRecoveryCOGS+totalDR.marketingDisc+totalDR.staffDisc)} more than it should be. True P&L separates operational failure costs from genuine commercial discounting.
             </div>
           </Accordion>
@@ -1858,7 +1859,7 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
           <Row><Badge small label="Monthly Adjustment Total" value={-mc.extraOpex} color={RD}/></Row>
           <SH>Notes</SH>
           <textarea value={extras?.notes||""} onChange={e=>onExtrasChange({...extras,notes:e.target.value})} placeholder="Monthly context, one-off costs..." rows={3}
-            style={{width:"100%",boxSizing:"border-box",background:"#12111a",border:"1px solid "+BR,color:TX,padding:"10px 12px",fontFamily:ff,fontSize:14,outline:"none",borderRadius:radius,resize:"vertical"}}/>
+            style={{width:"100%",boxSizing:"border-box",background:S2,border:"1px solid "+BR,color:TX,padding:"10px 12px",fontFamily:ff,fontSize:14,outline:"none",borderRadius:radius,resize:"vertical"}}/>
           <Row>
             <Badge small label="Net Revenue" value={mc.netRevenue} color={A}/>
             <Badge small label="Total Expenses" value={-mc.totalExpenses} color={RD}/>
