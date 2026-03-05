@@ -1795,7 +1795,7 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
     if(wStart>=from&&wEnd<=to)return 1;
     const overlapStart=wStart<from?from:wStart;
     const overlapEnd=wEnd>to?to:wEnd;
-    const overlapDays=(overlapEnd-overlapStart)/(1000*60*60*24)+1;
+    const overlapDays=Math.round((overlapEnd-overlapStart)/(1000*60*60*24));
     return Math.min(1,Math.max(0,overlapDays/7));
   };
 
