@@ -1380,7 +1380,7 @@ function DiscountBreakdown({week,onChange,labels}){
 
 // ─── Fixed Costs Page ─────────────────────────────────────────────────────────
 function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,labels}){
-  const {S,S2,BR,A,MU,TX,GR,BG,ff,radius}=useTheme();
+  const {S,S2,BR,A,OA,MU,TX,GR,BG,ff,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const displayKeys=keys.filter(k=>!k.sub); // hide sub-keys from fixed costs
   const fixedKeys=fixed?.fixedKeys||[];
@@ -1714,7 +1714,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
 
 // ─── Monthly Overview ─────────────────────────────────────────────────────────
 function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opexKeys,depts,labels}){
-  const {S2,BR,A,MU,TX,ff,RD,GR,radius}=useTheme();
+  const {S2,BR,A,OA,MU,TX,ff,RD,GR,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   const mc=calcMonth(weeks,fixed,extras,keys,wDepts);
@@ -1983,7 +1983,7 @@ function VisualisePage({weeks,fixed,allMonthData,opexKeys,depts}){
 
 // ─── Compare Page ─────────────────────────────────────────────────────────────
 function ComparePage({allMonthData,fixed,opexKeys,depts,labels}){
-  const {A,BR,S2,TX,MU,GR,RD,ff,radius}=useTheme();
+  const {A,OA,BR,S2,TX,MU,GR,RD,ff,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   const allKeys=Object.keys(allMonthData).sort();
@@ -2567,15 +2567,14 @@ export default function App(){
   const storedKeys=opexKeys.map(k=>k.key);
   DEFAULT_OPEX_KEYS.forEach(dk=>{if(!storedKeys.includes(dk.key))opexKeys.push(dk);});
   // Merge DEFAULT_WAGE_DEPTS so new depts (e.g. Superannuation) always appear
-  // even if settings were saved before they were added
   const storedDepts=settings?.wageDepts||DEFAULT_WAGE_DEPTS;
   const wageDepts=DEFAULT_WAGE_DEPTS.map(def=>{
     const stored=storedDepts.find(d=>d.key===def.key);
-    if(!stored)return def; // new dept not in storage — use default
-    // Merge subs: stored subs keep their labels, new default subs are appended
-    const storedSubKeys=stored.subs.map(s=>s.key);
+    if(!stored)return def;
+    const storedSubs=stored.subs||[];
+    const storedSubKeys=storedSubs.map(s=>s.key);
     const newSubs=def.subs.filter(s=>!storedSubKeys.includes(s.key));
-    return {...stored,subs:[...stored.subs,...newSubs]};
+    return {...stored,subs:[...storedSubs,...newSubs]};
   });
   const staff=settings?.staff||DEFAULT_STAFF;
   const theme=buildTheme(themeRaw);
