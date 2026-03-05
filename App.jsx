@@ -20,23 +20,53 @@ function applyLightness(hex, lightness) {
     return "#"+[adj(r),adj(g),adj(b)].map(v=>v.toString(16).padStart(2,"0")).join("");
   } catch(e){ return hex; }
 }
+// Returns black or white depending on which has better contrast against bg
+function contrastColor(hex){
+  try{
+    const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+    const lum=0.2126*(r/255)**2.2+0.7152*(g/255)**2.2+0.0722*(b/255)**2.2;
+    return lum>0.179?"#111111":"#ffffff";
+  }catch(e){return "#ffffff";}
+}
 
 function buildTheme(t) {
   const l=t.lightness??50, ap=hex=>applyLightness(hex,l);
+  const accent=ap(t.accent);
   return {
-    A:ap(t.accent), BG:ap(t.bg), S:ap(t.surface), S2:ap(t.surface2),
+    A:accent, BG:ap(t.bg), S:ap(t.surface), S2:ap(t.surface2),
     BR:ap(t.border), TX:ap(t.text), MU:ap(t.muted),
     RD:ap(t.red), GR:ap(t.green), YL:ap(t.yellow),
+    "#ffffff":contrastColor(accent), // on-accent: text color to use on accent background
     ff:t.bodyFont||"Times New Roman", ffTitle:t.titleFont||"Times New Roman",
     radius:t.borderRadius??4,
+    szHeaderTitle:t.headerTitleSize??22,
+    szHeaderBrand:t.headerBrandSize??9,
+    szSection:t.sectionHeaderSize??10,
+    szSubSection:t.subSectionSize??9,
   };
 }
+
+// ─── Text Style Defaults (bold / italic / size per label key) ────────────────
+const DEFAULT_TEXT_STYLES = {}; // { [key]: { bold:bool, italic:bool, size:number } }
+
+// ─── Financial Targets Defaults ───────────────────────────────────────────────
+const DEFAULT_TARGETS = {
+  gross_margin_target: 55,      // %
+  net_margin_target: 15,        // %
+  cogs_pct_target: 35,          // % of net revenue
+  opex_pct_target: 25,          // % of net revenue
+  wages_pct_target: 20,         // % of net revenue
+  promo_disc_rate_max: 12,      // % of gross sales
+  service_recovery_max_orders: 5, // orders per week before alert
+  service_recovery_cost_alert: 50, // $ per order before alert
+  refund_rate_max: 3,           // % of gross sales
+};
 
 // ─── Labels ───────────────────────────────────────────────────────────────────
 const DEFAULT_LABELS = {
   header_brand:"Finance Operations", header_title:"P&L Dashboard", header_subtitle:"weeks auto-dated Mon-Sun",
   tab_input:"WEEKLY INPUT", tab_overview:"MONTHLY OVERVIEW", tab_visualise:"VISUALISE",
-  tab_compare:"COMPARE", tab_fixed:"FIXED COSTS", tab_reports:"REPORTS",
+  tab_compare:"COMPARE", tab_fixed:"FIXED COSTS", tab_targets:"TARGETS", tab_reports:"REPORTS",
   sec_shopify:"Shopify Data Import", sec_shopify_btn:"AUTOFILL FROM DATA",
   sec_revenue:"Revenue and Deductions", sec_cogs:"COGS - Cost of Goods",
   sec_satchel:"Satchel Packaging - Auto-calculated by Order Count",
@@ -84,37 +114,40 @@ const DEFAULT_LABELS = {
   compare_title:"Comparative Analysis", compare_help:"Select two periods to compare performance side by side.",
 };
 
+// ─── Discount Code Registry ───────────────────────────────────────────────────
+const DISCOUNT_CODE_REGISTRY = [
+  { id:"RESHIP-FAULTY",  category:"service_recovery", useCase:"Replacement for faulty/wrong garment — product at $0, customer pays shipping or free", plCategory:"Warranty / COGS Expense", hasCOGS:true, hasShipping:true },
+  { id:"RESHIP-LOST",    category:"service_recovery", useCase:"Replacement for lost parcel (AusPost claim)", plCategory:"Logistics Loss / COGS", hasCOGS:true, hasShipping:true },
+  { id:"RESHIP-DAMAGED", category:"service_recovery", useCase:"Garment damaged in transit, replacement sent", plCategory:"Logistics Loss / COGS", hasCOGS:true, hasShipping:true },
+  { id:"RESHIP-RTS",     category:"service_recovery", useCase:"Return-to-sender reshipment — customer paid, you're resending", plCategory:"Logistics / Operational", hasCOGS:false, hasShipping:true },
+  { id:"RESHIP-CUSTOMS", category:"service_recovery", useCase:"Parcel failed customs, being resent free of charge", plCategory:"Logistics Loss", hasCOGS:true, hasShipping:true },
+  { id:"EXCHANGE-SE",    category:"service_recovery", useCase:"Size exchange — customer paid, you're sending correct size", plCategory:"Customer Retention Cost / COGS", hasCOGS:true, hasShipping:true },
+  { id:"EXCHANGE-GIFT",  category:"service_recovery", useCase:"Exchange absorbed as goodwill gesture", plCategory:"CS Goodwill Expense", hasCOGS:true, hasShipping:true },
+  { id:"CS-ERROR",       category:"service_recovery", useCase:"We packed wrong item — replacement sent at our cost", plCategory:"Operational Error / COGS", hasCOGS:true, hasShipping:true },
+  { id:"FM2USTAFF",      category:"staff",            useCase:"Staff purchases", plCategory:"Staff Benefit / COGS", hasCOGS:false, hasShipping:false },
+  { id:"COLLAB2026",     category:"marketing",        useCase:"Marketing / Influencer collaboration", plCategory:"Customer Acquisition Cost (Marketing)", hasCOGS:false, hasShipping:true },
+];
+
+const DISC_CATEGORIES = [
+  { id:"service_recovery", label:"Service Recovery",      badge:"Reclassified: COGS / Operational", colorKey:"RD" },
+  { id:"marketing",        label:"Marketing / Influencer",badge:"Reclassified: Marketing Expense",  colorKey:"YL" },
+  { id:"staff",            label:"Staff Discounts",        badge:"Reclassified: Staff Benefits",     colorKey:"A"  },
+  { id:"promotional",      label:"Promotional / Sale",     badge:"Stays: Revenue Deduction",         colorKey:"GR" },
+];
+
 // ─── Discount Bucket Defaults ─────────────────────────────────────────────────
 const DEFAULT_DISC_BUCKETS = [
-  {
-    id:"service_recovery", labelKey:"disc_service_recovery", subKey:"disc_service_recovery_sub",
-    reclassAs:"cogs", // shown under COGS/Operational expense
-    defaultCodes:"RESHIP-FAULTY,RESHIP-LOST,RESHIP-DAMAGED,RESHIP-RTS,RESHIP-CUSTOMS,EXCHANGE-SE,EXCHANGE-GIFT,CS-WARRANTY,CS-ERROR",
-    hasCOGS:true, // show manufacturing COGS field
-  },
-  {
-    id:"marketing", labelKey:"disc_marketing", subKey:"disc_marketing_sub",
-    reclassAs:"marketing",
-    defaultCodes:"COLLAB2026",
-    hasCOGS:false,
-  },
-  {
-    id:"staff", labelKey:"disc_staff", subKey:"disc_staff_sub",
-    reclassAs:"wages",
-    defaultCodes:"STAFF",
-    hasCOGS:false,
-  },
-  {
-    id:"promotional", labelKey:"disc_promotional", subKey:"disc_promotional_sub",
-    reclassAs:"promotional", // stays in revenue deductions
-    defaultCodes:"",
-    hasCOGS:false,
-  },
+  { id:"service_recovery", labelKey:"disc_service_recovery", subKey:"disc_service_recovery_sub", reclassAs:"cogs",        defaultCodes:"RESHIP-FAULTY,RESHIP-LOST,RESHIP-DAMAGED,RESHIP-RTS,RESHIP-CUSTOMS,EXCHANGE-SE,EXCHANGE-GIFT,CS-WARRANTY,CS-ERROR", hasCOGS:true },
+  { id:"marketing",        labelKey:"disc_marketing",        subKey:"disc_marketing_sub",        reclassAs:"marketing",   defaultCodes:"COLLAB2026", hasCOGS:false },
+  { id:"staff",            labelKey:"disc_staff",            subKey:"disc_staff_sub",            reclassAs:"wages",        defaultCodes:"FM2USTAFF", hasCOGS:false },
+  { id:"promotional",      labelKey:"disc_promotional",      subKey:"disc_promotional_sub",      reclassAs:"promotional", defaultCodes:"", hasCOGS:false },
 ];
 
 // ─── OPEX / Wage defaults ─────────────────────────────────────────────────────
 const DEFAULT_OPEX_KEYS = [
-  {key:"auspost",label:"AusPost",group:"freight"},
+  {key:"auspost",label:"AusPost (Total)",group:"freight",computed:true},
+  {key:"auspost_domestic",label:"AusPost Domestic",group:"freight",sub:true,parent:"auspost"},
+  {key:"auspost_intl",label:"AusPost International",group:"freight",sub:true,parent:"auspost"},
   {key:"fedex",label:"FedEx / International",group:"freight"},
   {key:"customs_duties",label:"Customs and Duties",group:"freight"},
   {key:"collab_shipping",label:"Collab Shipping",group:"collabs"},
@@ -139,13 +172,19 @@ const DEFAULT_OPEX_KEYS = [
 ];
 
 const DEFAULT_WAGE_DEPTS = [
-  {key:"ops",label:"Operations",subs:[
-    {key:"ops_retail",label:"Retail"},
+  {key:"ops",label:"Operations Department",subs:[
+    {key:"ops_operations",label:"Operations"},
     {key:"ops_logistics",label:"Logistics"},
+    {key:"ops_retail",label:"Retail"},
     {key:"ops_cs",label:"Customer Service"},
   ]},
   {key:"marketing",label:"Marketing",subs:[{key:"marketing_dept",label:"Marketing"}]},
   {key:"hr",label:"HR & General Management",subs:[{key:"hr_management",label:"HR & General Management"}]},
+  {key:"super",label:"Superannuation",subs:[
+    {key:"super_ops",label:"Operations"},
+    {key:"super_marketing",label:"Marketing"},
+    {key:"super_hr",label:"HR & Management"},
+  ]},
 ];
 
 const DEFAULT_STAFF = [
@@ -181,9 +220,29 @@ const n=v=>parseFloat(v)||0;
 
 function emptyDiscBuckets(){
   const out={};
-  DEFAULT_DISC_BUCKETS.forEach(b=>{
-    out[b.id]={retailValue:"",orders:"",cogsValue:"",codes:b.defaultCodes};
+  DEFAULT_DISC_BUCKETS.forEach(b=>{out[b.id]={retailValue:"",orders:"",cogsValue:"",codes:b.defaultCodes};});
+  return out;
+}
+
+function emptyCodeData(){
+  const out={};
+  DISCOUNT_CODE_REGISTRY.forEach(c=>{out[c.id]={orders:"",retailValue:"",cogsValue:"",shippingValue:"",active:true};});
+  // promotional slot (user-entered codes)
+  out["__promo__"]={orders:"",retailValue:"",cogsValue:"",shippingValue:"",active:true,customCodes:""};
+  return out;
+}
+
+function codeDataToDiscBuckets(codeData){
+  const tot={service_recovery:{rv:0,ord:0,cogs:0},marketing:{rv:0,ord:0,cogs:0},staff:{rv:0,ord:0,cogs:0},promotional:{rv:0,ord:0,cogs:0}};
+  DISCOUNT_CODE_REGISTRY.forEach(c=>{
+    const d=codeData?.[c.id]; if(!d||d.active===false)return;
+    const t=tot[c.category]; if(!t)return;
+    t.rv+=n(d.retailValue); t.ord+=n(d.orders); t.cogs+=n(d.cogsValue)+n(d.shippingValue);
   });
+  // promo slot
+  const p=codeData?.["__promo__"]; if(p&&p.active!==false){ tot.promotional.rv+=n(p.retailValue); tot.promotional.ord+=n(p.orders); }
+  const out={};
+  DEFAULT_DISC_BUCKETS.forEach(b=>{const t=tot[b.id]||{}; out[b.id]={retailValue:t.rv||"",orders:t.ord||"",cogsValue:t.cogs||"",codes:b.defaultCodes};});
   return out;
 }
 
@@ -197,12 +256,14 @@ function emptyWeek(weekNum,dateRange,label,depts,opexKeys){
     revenue:{gross_sales:"",refunds:"",discounts:"",shipping_income:"",paypal_fees:""},
     cogs:{manufacturing_product:"",manufacturing_shipping:"",satchel_count:"",satchel_cost_each:"",other_packaging:""},
     discBuckets:emptyDiscBuckets(),
+    codeData:emptyCodeData(),
     wages:emptyWages(depts),
     opex:emptyOpex(opexKeys),
+    weekTargets:null, // per-week targets override, null = use global
   };
 }
 function emptyExtras(keys){return {opex:emptyOpex(keys),notes:""};}
-function emptyFixed(keys){return {values:emptyOpex(keys),fixedKeys:[],satchelCostDefault:"0.85"};}
+function emptyFixed(keys){return {values:emptyOpex(keys),fixedKeys:[],monthlyValues:emptyOpex(keys),monthlyFixedKeys:[],satchelCostDefault:"0.85"};}
 
 // Compute reclassified discount amounts from buckets
 function calcDiscReclassification(discBuckets){
@@ -214,14 +275,9 @@ function calcDiscReclassification(discBuckets){
     serviceRecoveryCOGS: n(sr.cogsValue)||n(sr.retailValue), // prefer COGS value if entered
     serviceRecoveryRetail: n(sr.retailValue),
     serviceRecoveryOrders: n(sr.orders),
-    // Marketing gifting: retailValue is Shopify's artefact (full retail of gifted units).
-    // It is NOT a real cash cost at retail — the actual cost is the manufacturing COGS
-    // of those units, which the user already enters in Collab COGS under OPEX.
-    // Therefore: strip retail value from all P&L calculations entirely.
-    // marketingDiscRetail = reference display only, zero P&L impact.
-    marketingDiscRetail: n(mkt.retailValue),
+    marketingDisc: n(mkt.retailValue),
+    marketingCogsValue: n(mkt.cogsValue), // unit COGS of gifted items — mirrors Collab Product COGS
     marketingOrders: n(mkt.orders),
-    // staffDisc stays — it IS a real cash cost (staff buying product at discount)
     staffDisc: n(staff.retailValue),
     staffOrders: n(staff.orders),
     promoDisc: n(promo.retailValue),
@@ -233,13 +289,11 @@ function calcWeek(week,fixed,opexKeys,depts){
   const r=week.revenue;
   const gross=n(r.gross_sales), refunds=n(r.refunds), totalDiscounts=n(r.discounts);
   const shipInc=n(r.shipping_income), ppFees=n(r.paypal_fees);
-
+  const effectiveBuckets=week.codeData?codeDataToDiscBuckets(week.codeData):(week.discBuckets||emptyDiscBuckets());
   // Reclassify discounts
-  const dr=calcDiscReclassification(week.discBuckets);
-  // True promotional discount: total discounts minus service recovery and staff discounts.
-  // Marketing gifting (dr.marketingDiscRetail) is Shopify's retail artefact — NOT subtracted
-  // from revenue. The real gifting cost (COGS of units) is already in Collab COGS in OPEX.
-  const promoDisc = dr.promoDisc || (totalDiscounts - dr.serviceRecoveryRetail - dr.staffDisc - dr.marketingDiscRetail);
+  const dr=calcDiscReclassification(effectiveBuckets);
+  // True promotional discount (stays in revenue deductions)
+  const promoDisc = dr.promoDisc || (totalDiscounts - dr.serviceRecoveryRetail - dr.marketingDisc - dr.staffDisc);
   const truePromoDisc = Math.max(0, promoDisc);
 
   const netRevenue = gross - refunds - truePromoDisc + shipInc - ppFees;
@@ -256,21 +310,39 @@ function calcWeek(week,fixed,opexKeys,depts){
 
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const getO=k=>{
+    // For computed parent keys (e.g. auspost), sum sub-keys if they exist
+    const keyDef=keys.find(kd=>kd.key===k);
+    if(keyDef?.computed){
+      const subKeys=keys.filter(kd=>kd.parent===k);
+      const hasAnySub=subKeys.some(kd=>week.opex?.[kd.key]!==""&&week.opex?.[kd.key]!==undefined);
+      if(subKeys.length>0&&hasAnySub){
+        const subSum=subKeys.reduce((s,kd)=>{
+          if(week.opex?.[kd.key]!==""&&week.opex?.[kd.key]!==undefined)return s+n(week.opex[kd.key]);
+          if(fixed?.fixedKeys?.includes(kd.key))return s+n(fixed?.values?.[kd.key]);
+          if(fixed?.monthlyFixedKeys?.includes(kd.key))return s+n(fixed?.monthlyValues?.[kd.key])/4;
+          return s;
+        },0);
+        return subSum; // return even if 0 — sub-keys are the source of truth once any is set
+      }
+    }
+    // Week-level override takes priority
     if(week.opex?.[k]!==""&&week.opex?.[k]!==undefined)return n(week.opex[k]);
+    // Weekly fixed cost (full amount each week)
     if(fixed?.fixedKeys?.includes(k))return n(fixed?.values?.[k]);
+    // Monthly fixed cost (divided by 4 weeks)
+    if(fixed?.monthlyFixedKeys?.includes(k))return n(fixed?.monthlyValues?.[k])/4;
     return 0;
   };
-  const totalOPEXBase=keys.reduce((s,{key})=>s+getO(key),0);
-  // Marketing gifting retail value is NOT added to OPEX.
-  // The real cost (manufacturing COGS of gifted units) is already captured
-  // by the user in Collab COGS under OPEX. No double-counting.
-  const totalOPEX=totalOPEXBase;
+  // Exclude sub-keys from totals (they roll up into parent computed key)
+  const totalOPEXBase=keys.filter(k=>!k.sub).reduce((s,{key})=>s+getO(key),0);
+  // Marketing discount reclassified as marketing expense
+  const totalOPEX=totalOPEXBase+dr.marketingDisc;
 
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   // Staff discount reclassified as wages/staff benefit
   const totalWages=allWageKeys(wDepts).reduce((s,k)=>s+n(week.wages?.[k]||0),0)+dr.staffDisc;
 
-  const totalFreight=keys.filter(k=>k.group==="freight").reduce((s,{key})=>s+getO(key),0);
+  const totalFreight=keys.filter(k=>k.group==="freight"&&!k.sub).reduce((s,{key})=>s+getO(key),0);
   const totalCollabs=keys.filter(k=>k.group==="collabs").reduce((s,{key})=>s+getO(key),0);
 
   const totalExpenses=totalCOGS+totalOPEX+totalWages;
@@ -334,18 +406,113 @@ async function saveAll(monthData,fixed,settings){
 
 // ─── Shopify Parser ───────────────────────────────────────────────────────────
 function parseShopify(raw){
-  if(!raw?.trim())return{};
-  const result={gross_sales:0,refunds:0,discounts:0,shipping_income:0};
+  if(!raw?.trim())return{revenue:{},cogs:{},opex:{}};
+
+  const revenue={};
+  const cogs={};
+  const opex={};
+
+  const getNum=line=>{
+    const nums=line.match(/[\d,]+\.?\d*/g);
+    if(!nums)return null;
+    return parseFloat(nums[nums.length-1].replace(/,/g,""))||0;
+  };
+  const getInt=line=>{
+    const nums=line.match(/\d+/g);
+    if(!nums)return null;
+    return parseInt(nums[nums.length-1])||0;
+  };
+
+  // Skip section header lines (e.g. "SECTION 1 — REVENUE", "--- COGS ---")
+  const isSectionHeader=l=>(/^section\s+\d/i.test(l)||/^-{2,}/.test(l.trim())||(/^[A-Z\s\d—–-]{5,}$/.test(l.trim())&&!l.includes(":")));
+
   raw.split("\n").forEach(line=>{
-    const low=line.toLowerCase(),nums=line.match(/[\d,]+\.?\d*/g);
-    if(!nums)return;
-    const val=parseFloat(nums[nums.length-1].replace(/,/g,""))||0;
-    if(low.includes("gross sale")||low.includes("total sale"))result.gross_sales=val;
-    else if(low.includes("refund")||low.includes("return"))result.refunds=val;
-    else if(low.includes("discount"))result.discounts=val;
-    else if(low.includes("shipping")&&!low.includes("free")&&!low.includes("carrier"))result.shipping_income=val;
+    const low=line.toLowerCase().trim();
+    if(!low)return;
+    if(isSectionHeader(line.trim()))return; // skip headers like "SECTION 2 — COGS"
+
+    // ── Revenue fields ──────────────────────────────────────────────────────
+    if(low.includes("gross sale")||low.includes("total sale")||low.includes("total revenue")){
+      const v=getNum(line); if(v!==null)revenue.gross_sales=v;
+    } else if(low.includes("refund")&&!low.includes("shipping")&&!low.includes("reason")&&!low.includes("number of")&&!low.includes("total number")){
+      // Only capture the first clean refund line (e.g. "Refunds: 338.04"), not "Total Refund Amount" or "Refund Reason" lines
+      if(revenue.refunds===undefined){const v=getNum(line);if(v!==null)revenue.refunds=v;}
+    } else if(low.includes("discount")&&!low.includes("collab")&&!low.includes("staff")&&!low.includes("influencer")&&!low.includes("code breakdown")){
+      const v=getNum(line); if(v!==null)revenue.discounts=v;
+    } else if(low.includes("shipping")&&(low.includes("income")||low.includes("revenue")||low.includes("collected")||low.includes("charged"))){
+      const v=getNum(line); if(v!==null)revenue.shipping_income=v;
+    } else if(low.includes("paypal")||low.includes("pay pal")){
+      const v=getNum(line); if(v!==null)revenue.paypal_fees=v;
+
+    // ── COGS fields ─────────────────────────────────────────────────────────
+    // "Manufacturing:" alone maps to manufacturing_product (the main COGS line)
+    } else if(low.includes("manufactur")&&!low.includes("ship")&&!low.includes("inbound")&&!low.includes("freight")){
+      const v=getNum(line); if(v!==null)cogs.manufacturing_product=v;
+    } else if((low.includes("manufactur")&&(low.includes("ship")||low.includes("inbound")||low.includes("freight")))||low.includes("inbound freight")||low.includes("mfg shipping")){
+      const v=getNum(line); if(v!==null)cogs.manufacturing_shipping=v;
+    } else if(low.includes("number of order")||low.includes("order count")||(low.includes("order")&&low.includes("satchel"))){
+      // "Number of Orders" → satchel count. Exclude "total order" to avoid confusing with revenue
+      const v=getInt(line); if(v!==null&&v>0)cogs.satchel_count=v;
+    } else if(low.includes("other packaging")||low.includes("packaging cost")){
+      const v=getNum(line); if(v!==null)cogs.other_packaging=v;
+
+    // ── OPEX: Freight ───────────────────────────────────────────────────────
+    } else if(low.includes("auspost domestic")||low.includes("aus post domestic")||low.includes("australia post domestic")||(low.includes("auspost")&&low.includes("domestic"))){
+      const v=getNum(line); if(v!==null)opex.auspost_domestic=v;
+    } else if(low.includes("auspost intl")||low.includes("auspost international")||low.includes("aus post international")||low.includes("australia post international")||(low.includes("auspost")&&low.includes("intl"))){
+      const v=getNum(line); if(v!==null)opex.auspost_intl=v;
+    } else if(low.includes("auspost")||low.includes("aus post")||(low.includes("australia post"))){
+      const v=getNum(line); if(v!==null)opex.auspost=v;
+    } else if(low.includes("fedex")||low.includes("fed ex")||low.includes("international freight")||low.includes("dhl")||low.includes("ups")){
+      const v=getNum(line); if(v!==null)opex.fedex=v;
+    } else if(low.includes("custom")&&(low.includes("dut")||low.includes("tax")||low.includes("clearance"))){
+      const v=getNum(line); if(v!==null)opex.customs_duties=v;
+
+    // ── OPEX: Collabs ───────────────────────────────────────────────────────
+    } else if((low.includes("collab")&&low.includes("ship"))||(low.includes("influencer")&&low.includes("ship"))){
+      const v=getNum(line); if(v!==null)opex.collab_shipping=v;
+    } else if((low.includes("collab")&&(low.includes("product")||low.includes("cogs")))||(low.includes("influencer")&&low.includes("product"))){
+      const v=getNum(line); if(v!==null)opex.collab_product_cogs=v;
+    } else if(low.includes("uppromote")||low.includes("affiliate commission")||low.includes("referral commission")){
+      const v=getNum(line); if(v!==null)opex.uppromote_commission=v;
+    } else if(low.includes("paid collab")||low.includes("paid influencer")||(low.includes("collab fee")||low.includes("influencer fee"))){
+      const v=getNum(line); if(v!==null)opex.paid_collab_fees=v;
+
+    // ── OPEX: General ───────────────────────────────────────────────────────
+    } else if(low.includes("shopify app")){
+      const v=getNum(line); if(v!==null)opex.shopify_apps=v;
+    } else if(low.includes("shopify")&&!low.includes("app")){
+      const v=getNum(line); if(v!==null)opex.shopify=v;
+    } else if(low.includes("meta ad")||low.includes("tiktok ad")||low.includes("google ad")||low.includes("facebook ad")||(low.includes("paid ad"))){
+      const v=getNum(line); if(v!==null)opex.meta_tiktok_ads=v;
+    } else if(low.includes("model wage")||low.includes("model cost")||low.includes("content creator wage")){
+      const v=getNum(line); if(v!==null)opex.model_wages=v;
+    } else if(low.includes("rent")&&(low.includes("util")||low.includes("electric")||low.includes("water"))){
+      const v=getNum(line); if(v!==null)opex.rent_utilities=v;
+    } else if(low.includes("insurance")){
+      const v=getNum(line); if(v!==null)opex.insurance=v;
+    } else if(low.includes("xero")||(low.includes("accounting")&&!low.includes("bank"))){
+      const v=getNum(line); if(v!==null)opex.accounting_xero=v;
+    } else if(low.includes("deputy")||low.includes("rostering")){
+      const v=getNum(line); if(v!==null)opex.rostering_deputy=v;
+    } else if(low.includes("repliai")||low.includes("repli ai")||low.includes("customer service platform")){
+      const v=getNum(line); if(v!==null)opex.customer_service_repliai=v;
+    } else if(low.includes("internet")||low.includes("telephone")||low.includes("phone plan")){
+      const v=getNum(line); if(v!==null)opex.internet_phone=v;
+    } else if(low.includes("bank fee")||(low.includes("bank")&&low.includes("account"))){
+      const v=getNum(line); if(v!==null)opex.bank_accounting=v;
+    } else if(low.includes("legal")||low.includes("lawyer")||low.includes("solicitor")){
+      const v=getNum(line); if(v!==null)opex.legal=v;
+    } else if(low.includes("office cost")||low.includes("office supply")||low.includes("stationery")){
+      const v=getNum(line); if(v!==null)opex.office_costs=v;
+    } else if(low.includes("google workspace")||low.includes("microsoft 365")||low.includes("google admin")||low.includes("ms admin")){
+      const v=getNum(line); if(v!==null)opex.google_ms_admin=v;
+    }
   });
-  return Object.fromEntries(Object.entries(result).map(([k,v])=>[k,v||""]));
+
+  // Strip zeros (leave only fields that were actually found)
+  const clean=obj=>Object.fromEntries(Object.entries(obj).filter(([,v])=>v!==""&&v!==null&&v!==0).map(([k,v])=>[k,v]));
+  return{revenue:clean(revenue),cogs:clean(cogs),opex:clean(opex)};
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────
@@ -367,37 +534,37 @@ function generateExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,labels){
 
   // Discount reclassification summary
   const totalDR=mc.weekCalcs.reduce((s,c)=>({
-    serviceRecoveryCOGS:s.serviceRecoveryCOGS+(c.discReclass?.serviceRecoveryCOGS||0),
-    serviceRecoveryOrders:s.serviceRecoveryOrders+(c.discReclass?.serviceRecoveryOrders||0),
-    marketingDiscRetail:s.marketingDiscRetail+(c.discReclass?.marketingDiscRetail||0),
-    staffDisc:s.staffDisc+(c.discReclass?.staffDisc||0),
-    promoDisc:s.promoDisc+(c.discReclass?.promoDisc||0),
-  }),{serviceRecoveryCOGS:0,serviceRecoveryOrders:0,marketingDiscRetail:0,staffDisc:0,promoDisc:0});
+    serviceRecoveryCOGS:s.serviceRecoveryCOGS+c.discReclass.serviceRecoveryCOGS,
+    serviceRecoveryOrders:s.serviceRecoveryOrders+c.discReclass.serviceRecoveryOrders,
+    marketingDisc:s.marketingDisc+c.discReclass.marketingDisc,
+    staffDisc:s.staffDisc+c.discReclass.staffDisc,
+    promoDisc:s.promoDisc+c.discReclass.promoDisc,
+  }),{serviceRecoveryCOGS:0,serviceRecoveryOrders:0,marketingDisc:0,staffDisc:0,promoDisc:0});
   o+="--- DISCOUNT RECLASSIFICATION ---\n";
-  o+="Total Shopify discounts recorded: "+fmt(tDisc)+"\n";
-  o+="  Influencer gifting — Shopify retail artefact (REFERENCE ONLY, zero P&L impact): "+fmt(totalDR.marketingDiscRetail)+"\n";
-  o+="  IMPORTANT: This is the retail price of product sent to influencers at $0. It is NOT\n";
-  o+="  a cash cost at retail value and NOT a revenue loss. Shopify records it as a 'discount'\n";
-  o+="  because checkout price was $0. The real cost — manufacturing COGS of gifted units —\n";
-  o+="  is already captured in Collab COGS under OPEX. Do not treat this as gifting spend.\n";
-  o+="  Service Recovery (reclassified → COGS): "+fmt(totalDR.serviceRecoveryCOGS)+" | "+totalDR.serviceRecoveryOrders+" orders\n";
-  o+="  Staff discounts (reclassified → Wages / staff benefit): "+fmt(totalDR.staffDisc)+"\n";
-  o+="  TRUE PROMOTIONAL DISCOUNTS (the only bucket reducing Net Revenue): "+fmt(totalDR.promoDisc)+" ("+pct(totalDR.promoDisc,gSales)+" of gross)\n\n";
+  o+="Service Recovery (ops expense / COGS): "+fmt(totalDR.serviceRecoveryCOGS)+" | "+totalDR.serviceRecoveryOrders+" orders\n";
+  o+="Influencer / Marketing gifting: "+fmt(totalDR.marketingDisc)+"\n";
+  o+="Staff discounts (staff benefit): "+fmt(totalDR.staffDisc)+"\n";
+  o+="True promotional discounts: "+fmt(totalDR.promoDisc)+" ("+pct(totalDR.promoDisc,gSales)+" of gross - this is the ONLY bucket affecting Net Revenue)\n\n";
 
   weeks.forEach((w,i)=>{
     const c=mc.weekCalcs[i];
+    const wTargets=w.weekTargets||DEFAULT_TARGETS;
     o+="--- "+w.label+" | "+w.dateRange+" ---\n";
     o+="  Gross: "+fmt(n(w.revenue.gross_sales))+" | Total Discounts: -"+fmt(n(w.revenue.discounts))+" | True Promo Discount: -"+fmt(c.truePromoDisc)+" | Refunds: -"+fmt(n(w.revenue.refunds))+" | ShipIncome: +"+fmt(n(w.revenue.shipping_income))+" | PayPal: -"+fmt(n(w.revenue.paypal_fees))+" => NET: "+fmt(c.netRevenue)+"\n";
     o+="  COGS: MfgProduct "+fmt(n(w.cogs.manufacturing_product))+" | Inbound "+fmt(n(w.cogs.manufacturing_shipping))+" | Satchels "+n(w.cogs.satchel_count)+"@$"+(w.cogs.satchel_cost_each||fixed?.satchelCostDefault||"0.85")+"="+fmt(c.satchel)+" | ServiceRecovery "+fmt(c.discReclass.serviceRecoveryCOGS)+" => TOTAL: "+fmt(c.totalCOGS)+" | GP: "+fmt(c.grossProfit)+" ("+c.grossMargin.toFixed(1)+"%)\n";
     const fLines=keys.filter(k=>k.group==="freight").map(k=>{const v=w.opex?.[k.key]!==""?n(w.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);return k.label+": "+fmt(v);});
     o+="  Freight: "+fLines.join(" | ")+" => "+fmt(c.totalFreight)+"\n";
     const cLines=keys.filter(k=>k.group==="collabs").map(k=>{const v=w.opex?.[k.key]!==""?n(w.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);return k.label+": "+fmt(v);});
-    o+="  Collabs (OPEX): "+cLines.join(" | ")+" => "+fmt(c.totalCollabs)+" [NOTE: Collab COGS already includes manufacturing cost of gifted units]\n";
+    o+="  Collabs: "+cLines.join(" | ")+" | InfluencerGifting: "+fmt(c.discReclass.marketingDisc)+" => "+fmt(c.totalCollabs)+"\n";
     const wLines=wDepts.flatMap(d=>d.subs.map(s=>s.label+": "+fmt(n(w.wages?.[s.key]||0))));
     o+="  Wages: "+wLines.join(" | ")+" | StaffBenefits: "+fmt(c.discReclass.staffDisc)+" => "+fmt(c.totalWages)+"\n";
     const gLines=keys.filter(k=>k.group==="general").map(k=>{const v=w.opex?.[k.key]!==""?n(w.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);return v>0?k.label+": "+fmt(v):null;}).filter(Boolean);
     o+="  OPEX: "+(gLines.join(" | ")||"none")+" => "+fmt(c.totalOPEX)+"\n";
-    o+="  NET PROFIT: "+fmt(c.netProfit)+" ("+c.netMargin.toFixed(1)+"%)"+(w.notes?" | Notes: "+w.notes:"")+"\n\n";
+    o+="  NET PROFIT: "+fmt(c.netProfit)+" ("+c.netMargin.toFixed(1)+"%)"+(w.notes?" | Notes: "+w.notes:"")+"\n";
+    // Per-week alerts as action items
+    const wAlerts=generateAlerts(w,c.netRevenue,c.discReclass||{},n(w.revenue.gross_sales),wTargets);
+    if(wAlerts.length){o+="  ACTIONS REQUIRED:\n";wAlerts.forEach(a=>{o+="  "+a.icon+" "+a.title+": "+a.action+"\n";});}
+    o+="\n";
   });
 
   if(extras&&mc.extraOpex>0){
@@ -413,7 +580,7 @@ function generateExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,labels){
   }
   o+="=== END DATA ===\n\nYou are the COO's senior financial advisor. Produce a comprehensive P&L analysis in full paragraphs (NOT dot points).\n\n";
   o+="1. PROFITABILITY VERDICT - Net margin vs benchmarks (10-15% net, 40-65% gross). Growth/maintenance/risk posture.\n\n";
-  o+="2. DISCOUNT RECLASSIFICATION IMPACT - The Shopify 'discounts' figure includes the retail value of influencer gifting (a Shopify accounting artefact — the product was sent at $0 so Shopify records the full retail price as a discount, but this is NOT a real cash cost at retail and NOT lost revenue), service recovery codes (operational/COGS expense), and staff discounts (staff benefit). The real cost of influencer gifting is the manufacturing COGS of units sent, which is already captured in Collab COGS under OPEX. Explain clearly: (a) what the true promotional discount rate is to paying customers, (b) how the reclassification corrects Net Revenue, and (c) what the service recovery rate signals about product quality and operational efficiency.\n\n";
+  o+="2. DISCOUNT RECLASSIFICATION IMPACT - The total discounts figure includes service recovery (ops cost), influencer gifting (marketing), and staff benefits. Explain how reclassifying these changes the true picture of both revenue quality and operational efficiency. What is the real promotional discount rate? What is the service recovery rate and what does it signal about product quality?\n\n";
   o+="3. WEEK-ON-WEEK TRENDS - Trajectory, patterns, outliers.\n\n";
   o+="4. MONEY BLEED - Every cost category, dollar amount and % of net revenue. Ranked by impact.\n\n";
   o+="5. REVENUE QUALITY - True promo discount rate, refund rate, net revenue yield per gross dollar.\n\n";
@@ -468,7 +635,27 @@ function NI({value,onChange,placeholder="0"}){
 }
 
 function Lbl({c,children}){const {MU,ff}=useTheme();return <div style={{color:c||MU,fontFamily:ff,fontSize:11,letterSpacing:0.8,textTransform:"uppercase",marginBottom:5}}>{children}</div>;}
-function SH({children,sub}){const {A,BR,MU,ff}=useTheme();return <div style={{fontFamily:ff,fontSize:sub?9:10,letterSpacing:sub?1.5:2.5,textTransform:"uppercase",color:sub?MU:A,borderBottom:"1px solid "+BR,paddingBottom:7,marginBottom:14,marginTop:sub?16:26}}>{children}</div>;}
+
+// Section Header - main (full divider) vs sub (lighter)
+function SH({children,sub,divider=true}){
+  const {A,BR,MU,ff,szSection,szSubSection}=useTheme();
+  if(sub) return(
+    <div style={{fontFamily:ff,fontSize:szSubSection||9,letterSpacing:1.5,textTransform:"uppercase",color:MU,marginBottom:12,marginTop:20,paddingLeft:14,borderLeft:"2px solid "+MU+"44"}}>
+      {children}
+    </div>
+  );
+  return(
+    <div style={{marginTop:28,marginBottom:12}}>
+      {divider&&<div style={{height:1,background:"linear-gradient(to right,"+BR+",transparent)",marginBottom:0}}/>}
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0 10px",borderBottom:"2px solid "+A+"66"}}>
+        <div style={{width:3,height:16,background:A,borderRadius:2,flexShrink:0}}/>
+        <div style={{fontFamily:ff,fontSize:szSection||10,letterSpacing:2.5,textTransform:"uppercase",color:A,fontWeight:"bold"}}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
 function Row({children,gap=10}){return <div style={{display:"flex",gap,flexWrap:"wrap",marginTop:12}}>{children}</div>;}
 function Grid({children,cols=2}){return <div style={{display:"grid",gridTemplateColumns:"repeat("+cols+",1fr)",gap:10}}>{children}</div>;}
 function Fld({label,children}){return <div><Lbl>{label}</Lbl>{children}</div>;}
@@ -493,27 +680,63 @@ function Pct({label,value,small}){
   );
 }
 
-// E = Editable inline text (hover to reveal edit)
-function E({value,onSave,style={},multiline=false}){
+// E = Editable inline text (hover to reveal edit, right-click for style controls)
+function E({value,onSave,style={},multiline=false,styleKey,onStyleSave}){
   const [editing,setEditing]=useState(false);
   const [draft,setDraft]=useState(value);
   const [hover,setHover]=useState(false);
+  const [showStyle,setShowStyle]=useState(false);
   const {A}=useTheme();
   useEffect(()=>setDraft(value),[value]);
   const commit=()=>{setEditing(false);if(draft.trim()!==value)onSave(draft.trim()||value);};
+
+  // Build computed style from styleKey overrides
+  const ts=style||{};
+
+  const editBtn=(
+    <span style={{display:"inline-flex",gap:3,marginLeft:4,opacity:hover?0.55:0,transition:"opacity 0.15s"}}>
+      <span onClick={e=>{e.stopPropagation();setEditing(true);}} style={{fontSize:9,color:A,cursor:"text",userSelect:"none",letterSpacing:0.5}}>edit</span>
+      {onStyleSave&&<span onClick={e=>{e.stopPropagation();setShowStyle(s=>!s);}} style={{fontSize:9,color:A,cursor:"pointer",userSelect:"none",letterSpacing:0.5,marginLeft:2}}>Aa</span>}
+    </span>
+  );
+
   if(editing){
     if(multiline)return <textarea value={draft} onChange={e=>setDraft(e.target.value)} onBlur={commit} autoFocus
-      style={{background:"transparent",border:"none",borderBottom:"1px solid "+A,color:"inherit",fontFamily:"inherit",fontSize:"inherit",outline:"none",width:"100%",resize:"none",lineHeight:1.5,...style}}/>;
+      style={{background:"transparent",border:"none",borderBottom:"1px solid "+A,color:"inherit",fontFamily:"inherit",fontSize:"inherit",outline:"none",width:"100%",resize:"none",lineHeight:1.5,...ts}}/>;
     return <input value={draft} onChange={e=>setDraft(e.target.value)} onBlur={commit}
       onKeyDown={e=>{if(e.key==="Enter")commit();if(e.key==="Escape"){setEditing(false);setDraft(value);}}}
-      autoFocus style={{background:"transparent",border:"none",borderBottom:"1px solid "+A,color:"inherit",fontFamily:"inherit",fontSize:"inherit",outline:"none",width:"100%",...style}}/>;
+      autoFocus style={{background:"transparent",border:"none",borderBottom:"1px solid "+A,color:"inherit",fontFamily:"inherit",fontSize:"inherit",outline:"none",width:"100%",...ts}}/>;
   }
   return(
     <span onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)}
-      style={{display:"inline-flex",alignItems:"center",gap:5,cursor:"text",...style}}>
-      <span>{value}</span>
-      <span onClick={()=>setEditing(true)} style={{opacity:hover?0.35:0,fontSize:9,color:A,transition:"opacity 0.15s",userSelect:"none",letterSpacing:0.5,textTransform:"lowercase",fontWeight:"normal"}}>edit</span>
+      style={{display:"inline-flex",flexDirection:"column",position:"relative"}}>
+      <span style={{display:"inline-flex",alignItems:"center",...ts}}>
+        <span>{value}</span>
+        {editBtn}
+      </span>
+      {showStyle&&onStyleSave&&(
+        <TextStylePanel styleKey={styleKey} onStyleSave={onStyleSave} onClose={()=>setShowStyle(false)} currentStyle={ts}/>
+      )}
     </span>
+  );
+}
+
+function TextStylePanel({onStyleSave,onClose,currentStyle}){
+  const {S2,BR,A,MU,TX,ff,radius}=useTheme();
+  const [bold,setBold]=useState(currentStyle?.fontWeight==="bold"||currentStyle?.fontWeight===700);
+  const [italic,setItalic]=useState(currentStyle?.fontStyle==="italic");
+  const [size,setSize]=useState(parseInt(currentStyle?.fontSize)||12);
+  const apply=()=>{onStyleSave({bold,italic,size});onClose();};
+  return(
+    <div style={{position:"absolute",top:"100%",left:0,zIndex:200,background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"10px 12px",display:"flex",gap:8,alignItems:"center",whiteSpace:"nowrap",boxShadow:"0 8px 24px #00000088"}}>
+      <button onClick={()=>setBold(b=>!b)} style={{background:bold?A:"transparent",border:"1px solid "+(bold?A:BR),color:bold?"#ffffff":TX,fontFamily:ff,fontSize:11,fontWeight:"bold",padding:"3px 8px",cursor:"pointer",borderRadius:2}}>B</button>
+      <button onClick={()=>setItalic(i=>!i)} style={{background:italic?A:"transparent",border:"1px solid "+(italic?A:BR),color:italic?"#ffffff":TX,fontFamily:ff,fontSize:11,fontStyle:"italic",padding:"3px 8px",cursor:"pointer",borderRadius:2}}>I</button>
+      <input type="number" value={size} min={7} max={32} onChange={e=>setSize(parseInt(e.target.value)||12)}
+        style={{width:46,background:"transparent",border:"1px solid "+BR,color:TX,fontFamily:ff,fontSize:11,padding:"3px 6px",outline:"none",borderRadius:2,textAlign:"center"}}/>
+      <span style={{fontFamily:ff,fontSize:10,color:MU}}>px</span>
+      <button onClick={apply} style={{background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:10,padding:"4px 10px",cursor:"pointer",borderRadius:2,fontWeight:"bold"}}>Apply</button>
+      <button onClick={onClose} style={{background:"transparent",border:"none",color:MU,fontFamily:ff,fontSize:12,cursor:"pointer",padding:"2px 4px"}}>×</button>
+    </div>
   );
 }
 
@@ -533,106 +756,34 @@ function Accordion({title,children,defaultOpen=false,accent=false}){
   );
 }
 
-// ─── Discount Breakdown Section ───────────────────────────────────────────────
-function DiscountBreakdown({week,onChange,labels}){
-  const {A,MU,BR,S2,TX,GR,RD,YL,ff,radius}=useTheme();
-  const buckets=DEFAULT_DISC_BUCKETS;
-  const db=week.discBuckets||emptyDiscBuckets();
-  const totalDiscounts=n(week.revenue.discounts);
-
-  const upBucket=(id,field,val)=>{
-    onChange({...week,discBuckets:{...db,[id]:{...db[id],[field]:val}}});
-  };
-
-  const dr=calcDiscReclassification(db);
-  const allocatedDisc=dr.serviceRecoveryRetail+dr.marketingDiscRetail+dr.staffDisc+dr.promoDisc;
-  const unallocated=totalDiscounts-allocatedDisc;
-
-  const bucketColors={service_recovery:RD,marketing:YL,staff:A,promotional:GR};
-  const bucketIcons={service_recovery:"!",marketing:"*",staff:"s",promotional:"p"};
-
-  return(
-    <Accordion title={<E value={labels.disc_section} onSave={v=>labels._save("disc_section",v)} style={{fontFamily:ff,fontSize:10,color:A}}/>} accent>
-      <div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:16,lineHeight:1.7}}>
-        <E value={labels.disc_section_sub} onSave={v=>labels._save("disc_section_sub",v)} style={{fontFamily:ff,fontSize:12,color:MU}} multiline/>
-      </div>
-
-      {/* Summary bar */}
-      <div style={{background:S2,borderRadius:radius+1,padding:"12px 14px",marginBottom:16}}>
-        <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
-          <span style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:1}}>Total Shopify Discounts to Allocate</span>
-          <span style={{fontFamily:ff,fontSize:14,color:TX,fontWeight:"bold"}}>{fmtD(totalDiscounts)}</span>
-        </div>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-          {[["Service Rec.",dr.serviceRecoveryRetail,RD,"→ COGS"],["Staff",dr.staffDisc,A,"→ Wages"],["Promo",dr.promoDisc,GR,"→ Revenue deduction"],["Gifting (ref)",dr.marketingDiscRetail,"#ffd97d","retail artefact only"]].map(([l,v,c,note])=>(
-            <div key={l} style={{flex:1,minWidth:80,background:BR,borderRadius:3,padding:"6px 8px",borderLeft:"3px solid "+c}}>
-              <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.8}}>{l}</div>
-              <div style={{fontFamily:ff,fontSize:12,color:c,fontWeight:"bold",marginTop:2}}>{fmtD(v)}</div>
-              <div style={{fontFamily:ff,fontSize:9,color:MU,marginTop:1}}>{note}</div>
-            </div>
-          ))}
-        </div>
-        {/* Allocation check: gifting retail doesn't count toward allocation since it's not a real discount to paying customers */}
-        {(()=>{const realAlloc=dr.serviceRecoveryRetail+dr.staffDisc+dr.promoDisc+dr.marketingDiscRetail; const diff=totalDiscounts-realAlloc; return Math.abs(diff)>0.01?(<div style={{marginTop:8,fontFamily:ff,fontSize:11,color:Math.abs(diff)>1?RD:MU}}>Unallocated: {fmtD(diff)} — allocate remaining across buckets below</div>):null;})()}
-      </div>
-
-      {buckets.map(bucket=>{
-        const bData=db[bucket.id]||{retailValue:"",orders:"",cogsValue:"",codes:bucket.defaultCodes};
-        const col=bucketColors[bucket.id]||A;
-        const reclassBadge={service_recovery:"Reclassified as: COGS / Operational Expense",marketing:"Reference only — real cost (unit COGS) is in Collab COGS",staff:"Reclassified as: Staff Benefits (Wages)",promotional:"Stays as: Revenue Deduction"}[bucket.id];
-        return(
-          <div key={bucket.id} style={{background:S2,border:"1px solid "+col+"44",borderRadius:radius+1,padding:"14px 16px",marginBottom:12}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-              <div>
-                <div style={{fontFamily:ff,fontSize:11,color:col,letterSpacing:1.5,textTransform:"uppercase",fontWeight:"bold",marginBottom:4}}>
-                  <E value={labels[bucket.labelKey]||bucket.id} onSave={v=>labels._save(bucket.labelKey,v)} style={{fontFamily:ff,fontSize:11,color:col}}/>
-                </div>
-                <div style={{fontFamily:ff,fontSize:11,color:MU,lineHeight:1.6}}>
-                  <E value={labels[bucket.subKey]||""} onSave={v=>labels._save(bucket.subKey,v)} style={{fontFamily:ff,fontSize:11,color:MU}}/>
-                </div>
-              </div>
-              <div style={{background:col+"22",border:"1px solid "+col+"44",borderRadius:3,padding:"3px 8px",fontFamily:ff,fontSize:9,color:col,letterSpacing:0.8,textTransform:"uppercase",whiteSpace:"nowrap",marginLeft:12}}>
-                {reclassBadge}
-              </div>
-            </div>
-            <Grid cols={bucket.hasCOGS?3:2}>
-              <Fld label={<E value={labels.disc_field_retail} onSave={v=>labels._save("disc_field_retail",v)} style={{fontFamily:ff,fontSize:11,color:MU}}/>}>
-                <CI value={bData.retailValue} onChange={v=>upBucket(bucket.id,"retailValue",v)}/>
-              </Fld>
-              <Fld label={<E value={labels.disc_field_orders} onSave={v=>labels._save("disc_field_orders",v)} style={{fontFamily:ff,fontSize:11,color:MU}}/>}>
-                <NI value={bData.orders} onChange={v=>upBucket(bucket.id,"orders",v)}/>
-              </Fld>
-              {bucket.hasCOGS&&(
-                <Fld label={<E value={labels.disc_field_cogs} onSave={v=>labels._save("disc_field_cogs",v)} style={{fontFamily:ff,fontSize:11,color:MU}}/>}>
-                  <CI value={bData.cogsValue} onChange={v=>upBucket(bucket.id,"cogsValue",v)}/>
-                </Fld>
-              )}
-            </Grid>
-            <div style={{marginTop:10}}>
-              <Lbl><E value={labels.disc_field_codes} onSave={v=>labels._save("disc_field_codes",v)} style={{fontFamily:ff,fontSize:11,color:MU}}/></Lbl>
-              <input value={bData.codes} onChange={e=>upBucket(bucket.id,"codes",e.target.value)} placeholder="CODE1, CODE2, ..."
-                style={{...useBI(),fontFamily:"monospace",fontSize:12}}
-                onFocus={e=>e.target.style.borderColor=col} onBlur={e=>{}}/>
-            </div>
-          </div>
-        );
-      })}
-    </Accordion>
-  );
-}
-
 // ─── Shopify Import ───────────────────────────────────────────────────────────
 function ShopifyImport({week,onChange,labels}){
   const {S2,BR,A,S,TX,ff,MU,GR,RD,radius}=useTheme();
   const bi=useBI();
   const [raw,setRaw]=useState(week.shopifyRaw||"");
   const [msg,setMsg]=useState("");
+  const [detail,setDetail]=useState([]);
   function apply(){
     const parsed=parseShopify(raw);
-    const filled=Object.values(parsed).filter(v=>v!=="").length;
-    if(!filled){setMsg("No values detected - check format");return;}
-    onChange({...week,shopifyRaw:raw,revenue:{...week.revenue,...parsed}});
-    setMsg("Auto-filled "+filled+" fields");setTimeout(()=>setMsg(""),3000);
+    const rCount=Object.keys(parsed.revenue).length;
+    const cCount=Object.keys(parsed.cogs).length;
+    const oCount=Object.keys(parsed.opex).length;
+    const total=rCount+cCount+oCount;
+    if(!total){setMsg("No values detected — check format");setDetail([]);return;}
+    onChange({
+      ...week,
+      shopifyRaw:raw,
+      revenue:{...week.revenue,...parsed.revenue},
+      cogs:{...week.cogs,...parsed.cogs},
+      opex:{...week.opex,...parsed.opex},
+    });
+    const parts=[];
+    if(rCount)parts.push(rCount+" revenue");
+    if(cCount)parts.push(cCount+" COGS");
+    if(oCount)parts.push(oCount+" OPEX");
+    setMsg("Auto-filled "+total+" fields");
+    setDetail(parts);
+    setTimeout(()=>{setMsg("");setDetail([]);},4000);
   }
   return(
     <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"16px 18px",marginBottom:20}}>
@@ -641,13 +792,78 @@ function ShopifyImport({week,onChange,labels}){
       </div>
       <textarea value={raw} onChange={e=>setRaw(e.target.value)} placeholder="Paste Shopify CSV or tab-separated export here..." rows={4}
         style={{width:"100%",boxSizing:"border-box",background:S,border:"1px solid "+BR,color:TX,padding:"10px 12px",fontFamily:"monospace",fontSize:12,outline:"none",borderRadius:radius,resize:"vertical"}}/>
-      <div style={{display:"flex",alignItems:"center",gap:12,marginTop:10}}>
-        <button onClick={apply} style={{padding:"8px 18px",background:A,border:"none",color:"#000",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
-          <E value={labels.sec_shopify_btn} onSave={v=>labels._save("sec_shopify_btn",v)} style={{fontFamily:ff,fontSize:12,color:"#000"}}/>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginTop:10,flexWrap:"wrap"}}>
+        <button onClick={apply} style={{padding:"8px 18px",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
+          <E value={labels.sec_shopify_btn} onSave={v=>labels._save("sec_shopify_btn",v)} style={{fontFamily:ff,fontSize:12,color:"#ffffff"}}/>
         </button>
-        {msg&&<span style={{fontFamily:ff,fontSize:12,color:msg.includes("No")?RD:GR}}>{msg}</span>}
+        {msg&&<span style={{fontFamily:ff,fontSize:12,color:msg.includes("No")?RD:GR}}>{msg}{detail.length?<span style={{color:MU,fontSize:11}}> ({detail.join(", ")})</span>:null}</span>}
       </div>
     </div>
+  );
+}
+
+// ─── Confirm Modal ────────────────────────────────────────────────────────────
+function ConfirmModal({message,onConfirm,onCancel}){
+  const {BG,S2,BR,A,RD,MU,TX,ff,radius}=useTheme();
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div onClick={onCancel} style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.5)"}}/>
+      <div style={{position:"relative",zIndex:1,background:S2,border:"1px solid "+BR,borderRadius:radius+4,padding:"28px 32px",minWidth:320,maxWidth:420,boxShadow:"0 20px 60px #00000099",textAlign:"center"}}>
+        <div style={{fontFamily:ff,fontSize:14,color:TX,marginBottom:20,lineHeight:1.7}}>{message}</div>
+        <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+          <button onClick={onConfirm}
+            style={{padding:"10px 28px",background:RD,border:"none",color:"#fff",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1,textTransform:"uppercase"}}>
+            Yes, Clear
+          </button>
+          <button onClick={onCancel}
+            style={{padding:"10px 28px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Clear Section Button ─────────────────────────────────────────────────────
+function ClearBtn({onClear,label="section"}){
+  const {RD,ff,BR,radius}=useTheme();
+  const [showModal,setShowModal]=useState(false);
+  return(
+    <>
+      <button onClick={()=>setShowModal(true)}
+        style={{background:"transparent",border:"1px solid #ff6b6b44",color:"#ff6b6b88",fontFamily:ff,fontSize:9,padding:"2px 8px",cursor:"pointer",borderRadius:2,letterSpacing:0.5,textTransform:"uppercase",marginLeft:10}}>
+        Clear
+      </button>
+      {showModal&&(
+        <ConfirmModal
+          message={"Clear " + label + "? This will remove all entered data in this section."}
+          onConfirm={()=>{onClear();setShowModal(false);}}
+          onCancel={()=>setShowModal(false)}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── Clear All Button ─────────────────────────────────────────────────────────
+function ClearAll({onClear}){
+  const {RD,ff,BR,radius}=useTheme();
+  const [showModal,setShowModal]=useState(false);
+  return(
+    <>
+      <button onClick={()=>setShowModal(true)}
+        style={{padding:"9px 20px",background:"transparent",border:"1px solid "+RD+"66",color:RD+"99",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
+        Clear All Week Data
+      </button>
+      {showModal&&(
+        <ConfirmModal
+          message="Clear ALL data for this week? This will wipe every field — revenue, COGS, OPEX, wages, notes, and discounts."
+          onConfirm={()=>{onClear();setShowModal(false);}}
+          onCancel={()=>setShowModal(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -673,13 +889,16 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
 
   const opexField=(key,label)=>{
     const isFixed=fixed?.fixedKeys?.includes(key);
+    const isMonthly=fixed?.monthlyFixedKeys?.includes(key);
     const hasFixed=isFixed&&n(fixed?.values?.[key])>0;
+    const hasMonthly=isMonthly&&n(fixed?.monthlyValues?.[key])>0;
     const weekHasVal=week.opex?.[key]!=="";
-    const tint=hasFixed&&!weekHasVal?"#1c1730":undefined;
-    const display=weekHasVal?week.opex[key]:(hasFixed?fixed.values[key]:"");
+    const tint=!weekHasVal&&(hasFixed||hasMonthly)?A+"22":undefined;
+    const displayVal=weekHasVal?week.opex[key]:hasFixed?fixed.values[key]:hasMonthly?(n(fixed.monthlyValues[key])/4).toFixed(2):"";
     return(
       <Fld key={key} label={<E value={label} onSave={nl=>renameOpex(key,nl)} style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:0.8}}/>}>
-        <CI value={display} onChange={v=>upO(key,v)} tint={tint}/>
+        <CI value={displayVal} onChange={v=>upO(key,v)} tint={tint}/>
+        {!weekHasVal&&hasMonthly&&<div style={{fontFamily:ff,fontSize:9,color:MU,marginTop:2}}>÷4 of {fmtD(n(fixed.monthlyValues[key]))}/mo</div>}
       </Fld>
     );
   };
@@ -688,14 +907,20 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
     <div>
       <ShopifyImport week={week} onChange={onChange} labels={labels}/>
 
-      <SH><E value={labels.sec_revenue} onSave={v=>labels._save("sec_revenue",v)} style={{color:A,fontFamily:ff,fontSize:10}}/></SH>
-      <Grid>
-        <Fld label={<E value={labels.field_gross_sales} onSave={v=>labels._save("field_gross_sales",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.revenue.gross_sales} onChange={v=>upR("gross_sales",v)}/></Fld>
-        <Fld label={<E value={labels.field_refunds} onSave={v=>labels._save("field_refunds",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.revenue.refunds} onChange={v=>upR("refunds",v)}/></Fld>
-        <Fld label={<E value={labels.field_discounts} onSave={v=>labels._save("field_discounts",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.revenue.discounts} onChange={v=>upR("discounts",v)}/></Fld>
-        <Fld label={<E value={labels.field_shipping_income} onSave={v=>labels._save("field_shipping_income",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.revenue.shipping_income} onChange={v=>upR("shipping_income",v)}/></Fld>
-        <Fld label={<E value={labels.field_paypal_fees} onSave={v=>labels._save("field_paypal_fees",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.revenue.paypal_fees} onChange={v=>upR("paypal_fees",v)}/></Fld>
-      </Grid>
+      <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between"}}>
+        <div style={{flex:1}}><SH><E value={labels.sec_revenue} onSave={v=>labels._save("sec_revenue",v)} style={{color:"inherit",fontFamily:ff}}/></SH></div>
+        <div style={{paddingBottom:14}}><ClearBtn label="Revenue & Deductions" onClear={()=>onChange({...week,revenue:{gross_sales:"",refunds:"",discounts:"",shipping_income:"",paypal_fees:""}})} /></div>
+      </div>
+      {/* Indented sub-fields */}
+      <div style={{paddingLeft:16,borderLeft:"2px solid "+A+"22",marginTop:14,marginBottom:4}}>
+        <Grid>
+          <Fld label={<E value={labels.field_gross_sales} onSave={v=>labels._save("field_gross_sales",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.revenue.gross_sales} onChange={v=>upR("gross_sales",v)}/></Fld>
+          <Fld label={<E value={labels.field_refunds} onSave={v=>labels._save("field_refunds",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.revenue.refunds} onChange={v=>upR("refunds",v)}/></Fld>
+          <Fld label={<E value={labels.field_discounts} onSave={v=>labels._save("field_discounts",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.revenue.discounts} onChange={v=>upR("discounts",v)}/></Fld>
+          <Fld label={<E value={labels.field_shipping_income} onSave={v=>labels._save("field_shipping_income",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.revenue.shipping_income} onChange={v=>upR("shipping_income",v)}/></Fld>
+          <Fld label={<E value={labels.field_paypal_fees} onSave={v=>labels._save("field_paypal_fees",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.revenue.paypal_fees} onChange={v=>upR("paypal_fees",v)}/></Fld>
+        </Grid>
+      </div>
       {/* Discount reclassification - collapsed by default */}
       <DiscountBreakdown week={week} onChange={onChange} labels={labels}/>
       {/* Show reclassified net revenue impact */}
@@ -708,69 +933,106 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
       </div>
       <Row><Badge small label={<E value={labels.field_net_revenue} onSave={v=>labels._save("field_net_revenue",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>} value={c.netRevenue} color={A}/></Row>
 
-      <SH><E value={labels.sec_cogs} onSave={v=>labels._save("sec_cogs",v)} style={{color:A,fontFamily:ff,fontSize:10}}/></SH>
-      <Grid>
-        <Fld label={<E value={labels.field_mfg_product} onSave={v=>labels._save("field_mfg_product",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.cogs.manufacturing_product} onChange={v=>upC("manufacturing_product",v)}/></Fld>
-        <Fld label={<E value={labels.field_mfg_shipping} onSave={v=>labels._save("field_mfg_shipping",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.cogs.manufacturing_shipping} onChange={v=>upC("manufacturing_shipping",v)}/></Fld>
-      </Grid>
-      <div style={{marginTop:14,background:S2,border:"1px solid "+BR,borderRadius:radius+1,padding:"12px 14px"}}>
-        <div style={{fontFamily:ff,fontSize:10,letterSpacing:1.5,color:A,textTransform:"uppercase",marginBottom:10}}>
-          <E value={labels.sec_satchel} onSave={v=>labels._save("sec_satchel",v)} style={{color:A,fontFamily:ff,fontSize:10}}/>
-        </div>
-        <Grid>
-          <Fld label={<E value={labels.field_satchel_count} onSave={v=>labels._save("field_satchel_count",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}>
-            <input type="number" value={week.cogs.satchel_count} onChange={e=>upC("satchel_count",e.target.value)} placeholder="0" style={bi} onFocus={e=>e.target.style.borderColor=A} onBlur={e=>e.target.style.borderColor=BR}/>
-          </Fld>
-          <Fld label={<E value={labels.field_satchel_cost} onSave={v=>labels._save("field_satchel_cost",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={satchelCost} onChange={v=>upC("satchel_cost_each",v)}/></Fld>
-        </Grid>
-        <div style={{fontFamily:ff,fontSize:13,color:YL,marginTop:8}}><E value={labels.field_satchel_total} onSave={v=>labels._save("field_satchel_total",v)} style={{color:YL,fontFamily:ff,fontSize:13}}/>: {fmtD(c.satchel)}</div>
+      <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between"}}>
+        <div style={{flex:1}}><SH><E value={labels.sec_cogs} onSave={v=>labels._save("sec_cogs",v)} style={{color:"inherit",fontFamily:ff}}/></SH></div>
+        <div style={{paddingBottom:14}}><ClearBtn label="COGS section" onClear={()=>onChange({...week,cogs:{manufacturing_product:"",manufacturing_shipping:"",satchel_count:"",satchel_cost_each:"",other_packaging:""}})} /></div>
       </div>
-      {c.discReclass.serviceRecoveryCOGS>0&&(
-        <div style={{marginTop:10,background:"#1a0a0a",border:"1px solid "+RD+"44",borderRadius:radius+1,padding:"10px 14px"}}>
-          <span style={{fontFamily:ff,fontSize:11,color:RD}}>Service Recovery COGS auto-added: {fmtD(c.discReclass.serviceRecoveryCOGS)} (from discount breakdown above)</span>
+      <div style={{paddingLeft:16,borderLeft:"2px solid "+A+"22",marginTop:14,marginBottom:4}}>
+        <Grid>
+          <Fld label={<E value={labels.field_mfg_product} onSave={v=>labels._save("field_mfg_product",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.cogs.manufacturing_product} onChange={v=>upC("manufacturing_product",v)}/></Fld>
+          <Fld label={<E value={labels.field_mfg_shipping} onSave={v=>labels._save("field_mfg_shipping",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.cogs.manufacturing_shipping} onChange={v=>upC("manufacturing_shipping",v)}/></Fld>
+        </Grid>
+      </div>
+      <div style={{paddingLeft:16,borderLeft:"2px solid "+A+"22",marginTop:10,marginBottom:4}}>
+        <div style={{marginTop:4,background:S2,border:"1px solid "+BR,borderRadius:radius+1,padding:"12px 14px"}}>
+          <div style={{fontFamily:ff,fontSize:10,letterSpacing:1.5,color:A,textTransform:"uppercase",marginBottom:10}}>
+            <E value={labels.sec_satchel} onSave={v=>labels._save("sec_satchel",v)} style={{color:A,fontFamily:ff,fontSize:10}}/>
+          </div>
+          <Grid>
+            <Fld label={<E value={labels.field_satchel_count} onSave={v=>labels._save("field_satchel_count",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}>
+              <input type="number" value={week.cogs.satchel_count} onChange={e=>upC("satchel_count",e.target.value)} placeholder="0" style={bi} onFocus={e=>e.target.style.borderColor=A} onBlur={e=>e.target.style.borderColor=BR}/>
+            </Fld>
+            <Fld label={<E value={labels.field_satchel_cost} onSave={v=>labels._save("field_satchel_cost",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={satchelCost} onChange={v=>upC("satchel_cost_each",v)}/></Fld>
+          </Grid>
+          <div style={{fontFamily:ff,fontSize:13,color:YL,marginTop:8}}><E value={labels.field_satchel_total} onSave={v=>labels._save("field_satchel_total",v)} style={{color:YL,fontFamily:ff,fontSize:13}}/>: {fmtD(c.satchel)}</div>
         </div>
-      )}
-      <div style={{marginTop:10}}><Fld label={<E value={labels.field_other_pkg} onSave={v=>labels._save("field_other_pkg",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.cogs.other_packaging} onChange={v=>upC("other_packaging",v)}/></Fld></div>
+        {c.discReclass.serviceRecoveryCOGS>0&&(
+          <div style={{marginTop:10,background:RD+"15",border:"1px solid "+RD+"44",borderRadius:radius+1,padding:"10px 14px"}}>
+            <span style={{fontFamily:ff,fontSize:11,color:RD}}>Service Recovery COGS auto-added: {fmtD(c.discReclass.serviceRecoveryCOGS)} (from discount breakdown above)</span>
+          </div>
+        )}
+        <div style={{marginTop:10}}><Fld label={<E value={labels.field_other_pkg} onSave={v=>labels._save("field_other_pkg",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}><CI value={week.cogs.other_packaging} onChange={v=>upC("other_packaging",v)}/></Fld></div>
+      </div>
       <Row>
         <Badge small label={<E value={labels.field_total_cogs} onSave={v=>labels._save("field_total_cogs",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>} value={-c.totalCOGS} color={RD}/>
         <Badge small label={<E value={labels.field_gross_profit} onSave={v=>labels._save("field_gross_profit",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>} value={c.grossProfit}/>
         <Pct small label={<E value={labels.field_gross_margin} onSave={v=>labels._save("field_gross_margin",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>} value={c.grossMargin}/>
       </Row>
 
-      <SH><E value={labels.sec_opex} onSave={v=>labels._save("sec_opex",v)} style={{color:A,fontFamily:ff,fontSize:10}}/></SH>
-      <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:16}}><E value={labels.sec_opex_sub} onSave={v=>labels._save("sec_opex_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}} multiline/></div>
+      <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between"}}>
+        <div style={{flex:1}}><SH><E value={labels.sec_opex} onSave={v=>labels._save("sec_opex",v)} style={{color:"inherit",fontFamily:ff}}/></SH></div>
+        <div style={{paddingBottom:14}}><ClearBtn label="OPEX section" onClear={()=>onChange({...week,opex:emptyOpex(keys),wages:emptyWages(wDepts)})} /></div>
+      </div>
+      <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:14,paddingLeft:16}}><E value={labels.sec_opex_sub} onSave={v=>labels._save("sec_opex_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}} multiline/></div>
 
-      <SH sub><E value={labels.sec_freight} onSave={v=>labels._save("sec_freight",v)} style={{color:MU,fontFamily:ff,fontSize:9}}/></SH>
-      <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_freight_sub} onSave={v=>labels._save("sec_freight_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
-      <Grid>{freightKeys.map(({key,label})=>opexField(key,label))}</Grid>
-      <Row><Badge small label="Total Freight" value={-c.totalFreight} color={RD}/></Row>
+      <div style={{paddingLeft:16,borderLeft:"2px solid "+A+"22",marginTop:10}}>
+        <SH sub><E value={labels.sec_freight} onSave={v=>labels._save("sec_freight",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
+        <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_freight_sub} onSave={v=>labels._save("sec_freight_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
+        {/* AusPost: domestic + international calculator */}
+        {(()=>{
+          const dom=n(week.opex?.auspost_domestic||0);
+          const intl=n(week.opex?.auspost_intl||0);
+          const total=dom+intl||n(week.opex?.auspost||0);
+          return(
+            <div style={{background:S2,border:"1px solid "+BR+"88",borderRadius:radius+1,padding:"12px 14px",marginBottom:10}}>
+              <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase",marginBottom:10}}>AusPost (Total: {fmtD(total)})</div>
+              <Grid>
+                <Fld label={<span style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:0.8}}>Domestic</span>}>
+                  <CI value={week.opex?.auspost_domestic||""} onChange={v=>{
+                    const newDom=n(v); const newIntl=n(week.opex?.auspost_intl||0);
+                    onChange({...week,opex:{...week.opex,auspost_domestic:v,auspost_intl:week.opex?.auspost_intl||"",auspost:""}});
+                  }}/>
+                </Fld>
+                <Fld label={<span style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:0.8}}>International</span>}>
+                  <CI value={week.opex?.auspost_intl||""} onChange={v=>{
+                    onChange({...week,opex:{...week.opex,auspost_intl:v,auspost_domestic:week.opex?.auspost_domestic||"",auspost:""}});
+                  }}/>
+                </Fld>
+              </Grid>
+              {(dom>0||intl>0)&&<div style={{fontFamily:ff,fontSize:11,color:A,marginTop:8}}>Total AusPost: {fmtD(dom+intl)}</div>}
+            </div>
+          );
+        })()}
+        <Grid>{freightKeys.filter(k=>!k.sub&&!k.computed&&k.key!=="auspost").map(({key,label})=>opexField(key,label))}</Grid>
+        <Row><Badge small label="Total Freight" value={-c.totalFreight} color={RD}/></Row>
 
-      <SH sub><E value={labels.sec_collabs} onSave={v=>labels._save("sec_collabs",v)} style={{color:MU,fontFamily:ff,fontSize:9}}/></SH>
-      <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_collabs_sub} onSave={v=>labels._save("sec_collabs_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
-      <Grid>{collabKeys.map(({key,label})=>opexField(key,label))}</Grid>
-      <Row><Badge small label="Total Collabs" value={-c.totalCollabs} color={RD}/></Row>
+        <SH sub><E value={labels.sec_collabs} onSave={v=>labels._save("sec_collabs",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
+        <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_collabs_sub} onSave={v=>labels._save("sec_collabs_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
+        <Grid>{collabKeys.map(({key,label})=>opexField(key,label))}</Grid>
+        <Row><Badge small label="Total Collabs" value={-c.totalCollabs} color={RD}/></Row>
 
-      <SH sub><E value={labels.sec_wages} onSave={v=>labels._save("sec_wages",v)} style={{color:MU,fontFamily:ff,fontSize:9}}/></SH>
-      <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_wages_sub} onSave={v=>labels._save("sec_wages_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
-      {wDepts.map(dept=>(
-        <div key={dept.key} style={{marginBottom:16}}>
-          <div style={{fontFamily:ff,fontSize:11,color:A,letterSpacing:1,textTransform:"uppercase",marginBottom:8,paddingBottom:4,borderBottom:"1px solid "+BR+"44"}}>
-            <E value={dept.label} onSave={nl=>renameDept(dept.key,nl)} style={{fontFamily:ff,fontSize:11,color:A}}/>
+        <SH sub><E value={labels.sec_wages} onSave={v=>labels._save("sec_wages",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
+        <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_wages_sub} onSave={v=>labels._save("sec_wages_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
+        {wDepts.map(dept=>(
+          <div key={dept.key} style={{marginBottom:16}}>
+            <div style={{fontFamily:ff,fontSize:11,color:A,letterSpacing:1,textTransform:"uppercase",marginBottom:8,paddingBottom:4,borderBottom:"1px solid "+BR+"44"}}>
+              <E value={dept.label} onSave={nl=>renameDept(dept.key,nl)} style={{fontFamily:ff,fontSize:11,color:A}}/>
+            </div>
+            <Grid>{dept.subs.map(sub=>(
+              <Fld key={sub.key} label={<E value={sub.label} onSave={nl=>renameSub(sub.key,nl)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}>
+                <CI value={week.wages?.[sub.key]||""} onChange={v=>upW(sub.key,v)}/>
+              </Fld>
+            ))}</Grid>
           </div>
-          <Grid>{dept.subs.map(sub=>(
-            <Fld key={sub.key} label={<E value={sub.label} onSave={nl=>renameSub(sub.key,nl)} style={{color:MU,fontFamily:ff,fontSize:11}}/>}>
-              <CI value={week.wages?.[sub.key]||""} onChange={v=>upW(sub.key,v)}/>
-            </Fld>
-          ))}</Grid>
-        </div>
-      ))}
-      <Row><Badge small label="Total Wages" value={-c.totalWages} color={RD}/></Row>
+        ))}
+        <Row><Badge small label="Total Wages" value={-c.totalWages} color={RD}/></Row>
 
-      <SH sub><E value={labels.sec_general} onSave={v=>labels._save("sec_general",v)} style={{color:MU,fontFamily:ff,fontSize:9}}/></SH>
-      <Grid>{generalKeys.map(({key,label})=>opexField(key,label))}</Grid>
-      <Row><Badge small label="Total OPEX" value={-c.totalOPEX} color={RD}/></Row>
+        <SH sub><E value={labels.sec_general} onSave={v=>labels._save("sec_general",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
+        <Grid>{generalKeys.map(({key,label})=>opexField(key,label))}</Grid>
+        <Row><Badge small label="Total OPEX" value={-c.totalOPEX} color={RD}/></Row>
+      </div>
 
-      <div style={{borderTop:"1px solid "+BR,marginTop:24,paddingTop:20}}>
+      <div style={{borderTop:"2px solid "+A+"44",marginTop:28,paddingTop:20}}>
         <div style={{fontFamily:ff,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:A,marginBottom:14}}>
           <E value={labels.sec_summary} onSave={v=>labels._save("sec_summary",v)} style={{color:A,fontFamily:ff,fontSize:10}}/>
         </div>
@@ -780,49 +1042,418 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
           <Badge label={<E value={labels.field_net_profit} onSave={v=>labels._save("field_net_profit",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>} value={c.netProfit}/>
           <Pct label={<E value={labels.field_net_margin} onSave={v=>labels._save("field_net_margin",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>} value={c.netMargin}/>
         </Row>
+        {/* Targets vs actuals inline */}
+        <TargetsPanel calc={c} week={week} labels={labels}/>
       </div>
-      <SH><E value={labels.sec_notes} onSave={v=>labels._save("sec_notes",v)} style={{color:A,fontFamily:ff,fontSize:10}}/></SH>
+      <SH><E value={labels.sec_notes} onSave={v=>labels._save("sec_notes",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
       <textarea value={week.notes} onChange={e=>onChange({...week,notes:e.target.value})} placeholder="Unusual costs, one-offs, events..." rows={3}
         style={{width:"100%",boxSizing:"border-box",background:S,border:"1px solid "+BR,color:TX,padding:"10px 12px",fontFamily:ff,fontSize:14,outline:"none",borderRadius:radius,resize:"vertical"}}/>
+
+      {/* Clear All */}
+      <div style={{marginTop:28,paddingTop:20,borderTop:"1px solid "+BR+"55",display:"flex",justifyContent:"flex-end"}}>
+        <ClearAll onClear={()=>onChange({
+          ...week,
+          revenue:{gross_sales:"",refunds:"",discounts:"",shipping_income:"",paypal_fees:""},
+          cogs:{manufacturing_product:"",manufacturing_shipping:"",satchel_count:"",satchel_cost_each:"",other_packaging:""},
+          opex:emptyOpex(keys),
+          wages:emptyWages(wDepts),
+          notes:"",
+          discBuckets:emptyDiscBuckets(),
+          codeData:emptyCodeData(),
+        })}/>
+      </div>
     </div>
+  );
+}
+
+// ─── Targets Panel (inline in WeekForm summary) ────────────────────────────────
+function TargetsPanel({calc,week,labels}){
+  const {S2,BR,A,MU,TX,GR,RD,YL,BG,ff,radius}=useTheme();
+  const targets=week?.weekTargets||labels._targets||DEFAULT_TARGETS;
+  const c=calc;
+  const gross=n(week?.revenue?.gross_sales);
+  const promoDisc=c.discReclass?.promoDisc||0;
+  const refundRate=gross>0?(n(week?.revenue?.refunds)/gross)*100:0;
+  const cogsPct=c.netRevenue>0?(c.totalCOGS/c.netRevenue)*100:0;
+  const opexPct=c.netRevenue>0?(c.totalOPEX/c.netRevenue)*100:0;
+  const wagesPct=c.netRevenue>0?(c.totalWages/c.netRevenue)*100:0;
+  const promoRate=gross>0?(promoDisc/gross)*100:0;
+
+  const metrics=[
+    {label:"Gross Margin",actual:c.grossMargin,target:targets.gross_margin_target,unit:"%",higherBetter:true},
+    {label:"Net Margin",actual:c.netMargin,target:targets.net_margin_target,unit:"%",higherBetter:true},
+    {label:"COGS %",actual:cogsPct,target:targets.cogs_pct_target,unit:"%",higherBetter:false},
+    {label:"OPEX %",actual:opexPct,target:targets.opex_pct_target,unit:"%",higherBetter:false},
+    {label:"Wages %",actual:wagesPct,target:targets.wages_pct_target,unit:"%",higherBetter:false},
+    {label:"Promo Rate",actual:promoRate,target:targets.promo_disc_rate_max,unit:"%",higherBetter:false},
+  ].filter(m=>m.actual>0||m.target>0);
+
+  const alerts=generateAlerts(week,c.netRevenue,c.discReclass||{},gross,targets);
+
+  if(metrics.every(m=>m.actual===0))return null;
+  return(
+    <div style={{marginTop:16}}>
+      <div style={{fontFamily:ff,fontSize:10,letterSpacing:2,color:A,textTransform:"uppercase",marginBottom:10}}>vs Targets</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:8,marginBottom:alerts.length?14:0}}>
+        {metrics.map(m=>{
+          const ok=m.higherBetter?m.actual>=m.target:m.actual<=m.target;
+          const col=ok?GR:(Math.abs(m.actual-m.target)<m.target*0.1?YL:RD);
+          const barPct=Math.min(100,m.target>0?m.higherBetter?(m.actual/m.target)*100:(m.actual<=m.target?100:(m.target/m.actual)*100):0);
+          return(
+            <div key={m.label} style={{background:BG,border:"1px solid "+BR,borderRadius:radius+1,padding:"8px 10px"}}>
+              <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.6,marginBottom:4}}>{m.label}</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+                <span style={{fontFamily:ff,fontSize:14,color:col,fontWeight:"bold"}}>{m.actual.toFixed(1)}{m.unit}</span>
+                <span style={{fontFamily:ff,fontSize:9,color:MU}}>tgt {m.target}{m.unit}</span>
+              </div>
+              <div style={{height:3,background:BR,borderRadius:2}}>
+                <div style={{height:3,width:barPct+"%",background:col,borderRadius:2,transition:"width 0.3s"}}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {alerts.map((a,i)=><AlertCard key={i} alert={a}/>)}
+    </div>
+  );
+}
+
+// ─── Discount Breakdown (per-code) ────────────────────────────────────────────
+function DiscountBreakdown({week,onChange,labels}){
+  const {A,MU,BR,S2,S,TX,GR,RD,YL,BG,ff,radius}=useTheme();
+  const bi=useBI();
+  const totalDiscounts=n(week.revenue.discounts);
+  const codeData=week.codeData||emptyCodeData();
+  const upCode=(id,field,val)=>onChange({...week,codeData:{...codeData,[id]:{...codeData[id],[field]:val}}});
+  const catColors={service_recovery:RD,marketing:YL,staff:A,promotional:GR};
+
+  // Shopify discount autofill for this section
+  const [discRaw,setDiscRaw]=useState("");
+  const [discMsg,setDiscMsg]=useState("");
+  const applyDiscShopify=()=>{
+    if(!discRaw.trim()){setDiscMsg("Paste Shopify discount code data above");return;}
+    const lines=discRaw.split("\n").map(l=>l.trim()).filter(l=>l.length>0);
+
+    const SKIP_PATTERNS=[
+      /^(code[\t\s]|code\s*\|)/i,
+      /subtotal/i, /grand.?total/i, /promotional\s*codes?:/i,
+      /internal.*codes?:/i, /^discount\s*code\s*usage/i,
+      /number\s*of\s*orders/i, /no\s*other\s*codes/i, /^\s*\(no\s*/i,
+    ];
+    const isSkip=line=>SKIP_PATTERNS.some(r=>r.test(line));
+
+    const splitLine=line=>{
+      // Prefer tab split; fallback pipe; fallback 2+ spaces
+      if(line.includes("\t")) return line.split("\t").map(p=>p.trim().replace(/[$,]/g,""));
+      if(line.includes("|"))  return line.split("|").map(p=>p.trim().replace(/[$,]/g,""));
+      // multiple-spaces split: split on 2+ spaces (Shopify AI plain text output)
+      return line.split(/\s{2,}/).map(p=>p.trim().replace(/[$,]/g,""));
+    };
+
+    const normalise=s=>s.replace(/[-_\s]/g,"").toUpperCase();
+
+    let filled=0;
+    const newCodeData={...codeData};
+
+    lines.forEach(line=>{
+      if(isSkip(line))return;
+      const parts=splitLine(line);
+      if(parts.length<2)return;
+
+      const rawCode=parts[0].trim();
+      if(!rawCode||rawCode.length<2)return;
+      // Skip lines starting with digit or pipe or parenthesis
+      if(/^[\d(|]/.test(rawCode))return;
+
+      const code=rawCode.toUpperCase();
+      const getNum=idx=>parseFloat((parts[idx]||"").replace(/[^0-9.]/g,""))||0;
+      const getInt=idx=>parseInt((parts[idx]||"").replace(/[^0-9]/g,""))||0;
+
+      // columns: Code | Retail | Orders | COGS | Shipping  (default Shopify AI order)
+      // but also handle: Code | Orders | Retail | COGS | Shipping
+      // Heuristic: if col[1] looks like a large decimal it's retail, if integer it's orders
+      let retail,orders,cogs,shipping;
+      const col1=parseFloat((parts[1]||"").replace(/[^0-9.]/g,""))||0;
+      const col2=parseFloat((parts[2]||"").replace(/[^0-9.]/g,""))||0;
+      const col1IsOrders=Number.isInteger(col1)&&col1<10000&&(parts[1]||"").indexOf(".")===-1;
+      if(col1IsOrders){
+        orders=col1; retail=col2; cogs=getNum(3); shipping=getNum(4);
+      } else {
+        retail=col1; orders=getInt(2); cogs=getNum(3); shipping=getNum(4);
+      }
+
+      const reg=DISCOUNT_CODE_REGISTRY.find(c=>c.id===code||normalise(c.id)===normalise(code));
+
+      if(reg){
+        newCodeData[reg.id]={...newCodeData[reg.id],orders:String(orders),retailValue:retail>0?String(retail):"",cogsValue:cogs>0?String(cogs):"",shippingValue:shipping>0?String(shipping):"",active:true};
+        filled++;
+      } else if(retail>0||orders>0){
+        const existing=newCodeData["__promo__"]||{};
+        newCodeData["__promo__"]={
+          ...existing,
+          orders:String((parseInt(existing.orders)||0)+orders),
+          retailValue:String(((parseFloat(existing.retailValue)||0)+retail).toFixed(2)),
+          customCodes:((existing.customCodes||"")+", "+rawCode).replace(/^,\s*/,""),
+        };
+        filled++;
+      }
+    });
+
+    if(filled===0){setDiscMsg("No codes found — check format (CODE  amount  orders)");return;}
+    onChange({...week,codeData:newCodeData});
+    setDiscMsg(`✓ Filled ${filled} code${filled>1?"s":""}`);setTimeout(()=>setDiscMsg(""),4000);
+  };
+
+  // Category totals
+  const catTotals={};
+  DISC_CATEGORIES.forEach(c=>{catTotals[c.id]={retail:0,orders:0,cogs:0,shipping:0};});
+  DISCOUNT_CODE_REGISTRY.forEach(code=>{
+    const d=codeData[code.id]||{}; if(d.active===false)return;
+    const t=catTotals[code.category]; if(!t)return;
+    t.retail+=n(d.retailValue); t.orders+=n(d.orders); t.cogs+=n(d.cogsValue); t.shipping+=n(d.shippingValue);
+  });
+  const p=codeData["__promo__"]||{}; if(p.active!==false){catTotals.promotional.retail+=n(p.retailValue);catTotals.promotional.orders+=n(p.orders);}
+  const totalAllocated=Object.values(catTotals).reduce((s,t)=>s+t.retail,0);
+  const unallocated=totalDiscounts-totalAllocated;
+
+  const promoRate=n(week.revenue.gross_sales)>0?(catTotals.promotional.retail/n(week.revenue.gross_sales))*100:0;
+  const srOrders=catTotals.service_recovery.orders;
+  const srCost=catTotals.service_recovery.cogs+catTotals.service_recovery.shipping;
+  const srCostPerOrder=srOrders>0?srCost/srOrders:0;
+  const targets=labels._targets||DEFAULT_TARGETS;
+  const promoAlert=promoRate>targets.promo_disc_rate_max;
+
+  return(
+    <Accordion title={<span style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:2,textTransform:"uppercase"}}><E value={labels.disc_section||"Discount Code Breakdown"} onSave={v=>labels._save("disc_section",v)} style={{fontFamily:ff,fontSize:10,color:A}}/></span>} accent>
+      {/* Shopify autofill for discounts */}
+      <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+1,padding:"12px 14px",marginBottom:16}}>
+        <div style={{fontFamily:ff,fontSize:9,letterSpacing:1.5,color:A,textTransform:"uppercase",marginBottom:8}}>Shopify Discount Import — paste code usage data below</div>
+        <textarea value={discRaw} onChange={e=>setDiscRaw(e.target.value)} rows={3}
+          placeholder={"RESHIP-FAULTY\t$120.00\t3\nEXCHANGE-SE\t$85.00\t2\n(code · retail amount · number of orders)"}
+          style={{width:"100%",boxSizing:"border-box",background:S,border:"1px solid "+BR,color:TX,padding:"8px 10px",fontFamily:"monospace",fontSize:11,outline:"none",borderRadius:radius,resize:"vertical"}}/>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginTop:8}}>
+          <button onClick={applyDiscShopify} style={{padding:"7px 16px",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>AUTOFILL FROM DATA</button>
+          {discMsg&&<span style={{fontFamily:ff,fontSize:11,color:discMsg.includes("No")||discMsg.includes("Paste")?RD:GR}}>{discMsg}</span>}
+        </div>
+      </div>
+
+      {/* Allocation summary */}
+      <div style={{background:S2,borderRadius:radius+1,padding:"12px 14px",marginBottom:18}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+          <span style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:1}}>Total Discounts to Allocate</span>
+          <span style={{fontFamily:ff,fontSize:15,color:TX,fontWeight:"bold"}}>{fmtD(totalDiscounts)}</span>
+        </div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {DISC_CATEGORIES.map(cat=>{
+            const col=catColors[cat.id]; const t=catTotals[cat.id]||{};
+            return(
+              <div key={cat.id} style={{flex:1,minWidth:90,background:BG,borderRadius:3,padding:"7px 10px",borderLeft:"3px solid "+col}}>
+                <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:2}}>{cat.label}</div>
+                <div style={{fontFamily:ff,fontSize:13,color:col,fontWeight:"bold"}}>{fmtD(t.retail||0)}</div>
+                <div style={{fontFamily:ff,fontSize:10,color:MU}}>{t.orders||0} orders</div>
+              </div>
+            );
+          })}
+        </div>
+        {Math.abs(unallocated)>0.01&&<div style={{marginTop:8,fontFamily:ff,fontSize:11,color:Math.abs(unallocated)>1?RD:MU}}>{Math.abs(unallocated)>1?"⚠ Unallocated: "+fmtD(unallocated):"✓ Fully allocated"}</div>}
+      </div>
+
+      {/* Per-category + per-code */}
+      {DISC_CATEGORIES.map(cat=>{
+        const col=catColors[cat.id]; const codes=DISCOUNT_CODE_REGISTRY.filter(c=>c.category===cat.id); const t=catTotals[cat.id]||{};
+        const isPromo=cat.id==="promotional";
+        return(
+          <div key={cat.id} style={{marginBottom:22}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid "+col+"44",paddingBottom:8,marginBottom:12}}>
+              <div>
+                <span style={{fontFamily:ff,fontSize:11,color:col,letterSpacing:1.5,textTransform:"uppercase",fontWeight:"bold"}}>
+                  <E value={labels["disc_"+cat.id]||cat.label} onSave={v=>labels._save("disc_"+cat.id,v)} style={{fontFamily:ff,fontSize:11,color:col}}/>
+                </span>
+                <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:3}}>
+                  <E value={labels["disc_"+cat.id+"_sub"]||""} onSave={v=>labels._save("disc_"+cat.id+"_sub",v)} style={{fontFamily:ff,fontSize:10,color:MU}}/>
+                </div>
+              </div>
+              <div style={{background:col+"22",border:"1px solid "+col+"44",borderRadius:3,padding:"3px 8px",fontFamily:ff,fontSize:9,color:col,letterSpacing:0.8,textTransform:"uppercase",whiteSpace:"nowrap",marginLeft:10}}>{cat.badge}</div>
+            </div>
+
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              {codes.map(code=>{
+                const d=codeData[code.id]||{orders:"",retailValue:"",cogsValue:"",shippingValue:"",active:true};
+                const active=d.active!==false;
+                const hasData=n(d.retailValue)>0||n(d.orders)>0;
+                const codeCost=n(d.cogsValue)+n(d.shippingValue);
+                const codeRetail=n(d.retailValue);
+                const totalLoss=codeCost>0?codeCost:codeRetail;
+                const orders=n(d.orders);
+                const cpp=orders>0&&totalLoss>0?totalLoss/orders:0;
+                return(
+                  <div key={code.id} style={{background:S2,border:"1px solid "+(hasData?col+"44":BR),borderRadius:radius+1,padding:"12px 14px",opacity:active?1:0.45}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:active?10:0}}>
+                      <div style={{flex:1}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:3}}>
+                          <span style={{fontFamily:"monospace",fontSize:12,color:col,fontWeight:"bold",letterSpacing:0.5}}>{code.id}</span>
+                          {hasData&&cpp>0&&<span style={{fontFamily:ff,fontSize:10,color:MU,background:BG,border:"1px solid "+BR,borderRadius:2,padding:"1px 6px"}}>{fmtD(cpp)}/order</span>}
+                          {hasData&&totalLoss>0&&<span style={{fontFamily:ff,fontSize:10,color:RD,background:RD+"11",border:"1px solid "+RD+"33",borderRadius:2,padding:"1px 6px"}}>−{fmtD(totalLoss)} total</span>}
+                        </div>
+                        <div style={{fontFamily:ff,fontSize:10,color:MU,lineHeight:1.5}}>{code.useCase}</div>
+                        <div style={{fontFamily:ff,fontSize:9,color:col+"99",marginTop:2,textTransform:"uppercase",letterSpacing:0.5}}>{code.plCategory}</div>
+                      </div>
+                      <button onClick={()=>onChange({...week,codeData:{...codeData,[code.id]:{...d,active:!active}}})}
+                        style={{background:"transparent",border:"1px solid "+BR,borderRadius:2,padding:"3px 8px",fontFamily:ff,fontSize:9,color:active?MU:col,cursor:"pointer",letterSpacing:0.5,textTransform:"uppercase",marginLeft:8,whiteSpace:"nowrap"}}>
+                        {active?"Hide":"Show"}
+                      </button>
+                    </div>
+                    {active&&(
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8}}>
+                        <Fld label={<span style={{fontFamily:ff,fontSize:10,color:MU,textTransform:"uppercase",letterSpacing:0.6}}>Orders</span>}><NI value={d.orders} onChange={v=>upCode(code.id,"orders",v)}/></Fld>
+                        <Fld label={<span style={{fontFamily:ff,fontSize:10,color:MU,textTransform:"uppercase",letterSpacing:0.6}}>Retail Discounted</span>}><CI value={d.retailValue} onChange={v=>upCode(code.id,"retailValue",v)}/></Fld>
+                        {code.hasCOGS&&<Fld label={<span style={{fontFamily:ff,fontSize:10,color:MU,textTransform:"uppercase",letterSpacing:0.6}}>Mfg COGS</span>}><CI value={d.cogsValue} onChange={v=>upCode(code.id,"cogsValue",v)}/></Fld>}
+                        {(code.hasShipping||cat.id==="marketing")&&<Fld label={<span style={{fontFamily:ff,fontSize:10,color:MU,textTransform:"uppercase",letterSpacing:0.6}}>Shipping Cost</span>}><CI value={d.shippingValue} onChange={v=>upCode(code.id,"shippingValue",v)}/></Fld>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Promotional: free-entry promo codes */}
+              {isPromo&&(
+                <div style={{background:S2,border:"1px solid "+col+"44",borderRadius:radius+1,padding:"12px 14px"}}>
+                  <div style={{fontFamily:ff,fontSize:10,color:col,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Sale / Promotional Codes</div>
+                  <div style={{marginBottom:8}}>
+                    <Lbl><span style={{fontFamily:ff,fontSize:10,color:MU,textTransform:"uppercase",letterSpacing:0.6}}>Discount codes used (comma separated)</span></Lbl>
+                    <input value={codeData["__promo__"]?.customCodes||""} onChange={e=>onChange({...week,codeData:{...codeData,__promo__:{...codeData["__promo__"],customCodes:e.target.value}}})}
+                      placeholder="SALE20, WINTER30, FLASH15 ..."
+                      style={{...bi,fontFamily:"monospace",fontSize:12}}
+                      onFocus={e=>e.target.style.borderColor=col} onBlur={e=>e.target.style.borderColor=BR}/>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8}}>
+                    <Fld label={<span style={{fontFamily:ff,fontSize:10,color:MU,textTransform:"uppercase",letterSpacing:0.6}}>Orders</span>}><NI value={codeData["__promo__"]?.orders||""} onChange={v=>onChange({...week,codeData:{...codeData,__promo__:{...codeData["__promo__"],orders:v}}})}/></Fld>
+                    <Fld label={<span style={{fontFamily:ff,fontSize:10,color:MU,textTransform:"uppercase",letterSpacing:0.6}}>Retail Discounted</span>}><CI value={codeData["__promo__"]?.retailValue||""} onChange={v=>onChange({...week,codeData:{...codeData,__promo__:{...codeData["__promo__"],retailValue:v}}})}/></Fld>
+                  </div>
+                  {promoRate>0&&(
+                    <div style={{marginTop:10,display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{height:3,flex:1,background:BR,borderRadius:2}}><div style={{height:3,width:Math.min(100,(promoRate/targets.promo_disc_rate_max)*100)+"%",background:promoAlert?RD:GR,borderRadius:2}}/></div>
+                      <span style={{fontFamily:ff,fontSize:11,color:promoAlert?RD:GR,fontWeight:"bold"}}>{promoRate.toFixed(1)}% of gross</span>
+                      <span style={{fontFamily:ff,fontSize:10,color:MU}}>target ≤{targets.promo_disc_rate_max}%</span>
+                    </div>
+                  )}
+                  {promoAlert&&<div style={{marginTop:8,fontFamily:ff,fontSize:10,color:RD}}>⚠ Exceeds target — discounting too aggressively. Consider reducing frequency or depth.</div>}
+                </div>
+              )}
+            </div>
+
+            {/* Category subtotal */}
+            {(t.retail>0||t.cogs>0||t.shipping>0)&&(
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10,padding:"8px 12px",background:col+"0d",border:"1px solid "+col+"22",borderRadius:radius}}>
+                <span style={{fontFamily:ff,fontSize:10,color:MU,flex:1,textTransform:"uppercase",letterSpacing:0.7}}>{cat.label} total</span>
+                <span style={{fontFamily:ff,fontSize:10,color:MU}}>Orders: <b style={{color:TX}}>{t.orders}</b></span>
+                <span style={{fontFamily:ff,fontSize:10,color:MU}}>Retail: <b style={{color:col}}>{fmtD(t.retail)}</b></span>
+                {(t.cogs+t.shipping)>0&&<span style={{fontFamily:ff,fontSize:10,color:RD,fontWeight:"bold"}}>P&L hit: {fmtD(t.cogs+t.shipping)}</span>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Service recovery insight */}
+      {srOrders>0&&(
+        <div style={{marginTop:16,background:S2,border:"1px solid "+BR,borderRadius:radius+1,padding:"12px 14px"}}>
+          <div style={{fontFamily:ff,fontSize:10,color:A,textTransform:"uppercase",letterSpacing:1.5,marginBottom:10}}>Service Recovery Analysis</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
+            <div style={{background:BG,borderRadius:radius,padding:"10px 12px",borderLeft:"3px solid "+RD}}>
+              <div style={{fontFamily:ff,fontSize:10,color:RD,textTransform:"uppercase",letterSpacing:0.7,marginBottom:6}}>This Week</div>
+              <div style={{fontFamily:ff,fontSize:11,color:TX}}>{srOrders} orders affected</div>
+              {srCostPerOrder>0&&<div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:3}}>Avg cost: <span style={{color:RD,fontWeight:"bold"}}>{fmtD(srCostPerOrder)}/order</span></div>}
+              <div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:3}}>Annualised: <span style={{color:RD,fontWeight:"bold"}}>{fmtD(srCost*52)}</span></div>
+            </div>
+            <div style={{background:BG,borderRadius:radius,padding:"10px 12px",borderLeft:"3px solid "+YL}}>
+              <div style={{fontFamily:ff,fontSize:10,color:YL,textTransform:"uppercase",letterSpacing:0.7,marginBottom:6}}>Action Guide</div>
+              {srOrders>=targets.service_recovery_max_orders
+                ?<div style={{fontFamily:ff,fontSize:10,color:YL,lineHeight:1.6}}>⚠ Exceeds {targets.service_recovery_max_orders} order threshold. Review product QC, packaging, and logistics partner performance.</div>
+                :<div style={{fontFamily:ff,fontSize:10,color:GR,lineHeight:1.6}}>✓ Within target ({targets.service_recovery_max_orders} orders/wk). Monitor for sustained increases.</div>}
+            </div>
+          </div>
+        </div>
+      )}
+    </Accordion>
   );
 }
 
 // ─── Fixed Costs Page ─────────────────────────────────────────────────────────
 function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,labels}){
-  const {S2,BR,A,MU,ff,radius}=useTheme();
+  const {S,S2,BR,A,MU,TX,GR,BG,ff,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
-  const total=keys.reduce((s,{key})=>s+n(fixed?.values?.[key]||0),0);
+  const displayKeys=keys.filter(k=>!k.sub); // hide sub-keys from fixed costs
   const fixedKeys=fixed?.fixedKeys||[];
-  const toggle=k=>{const nk=fixedKeys.includes(k)?fixedKeys.filter(x=>x!==k):[...fixedKeys,k];onChange({...fixed,fixedKeys:nk});};
+  const monthlyFixedKeys=fixed?.monthlyFixedKeys||[];
+  const toggleWeekly=k=>{
+    const nk=fixedKeys.includes(k)?fixedKeys.filter(x=>x!==k):[...fixedKeys,k];
+    // remove from monthly if adding to weekly
+    const nm=monthlyFixedKeys.filter(x=>x!==k);
+    onChange({...fixed,fixedKeys:nk,monthlyFixedKeys:nm});
+  };
+  const toggleMonthly=k=>{
+    const nm=monthlyFixedKeys.includes(k)?monthlyFixedKeys.filter(x=>x!==k):[...monthlyFixedKeys,k];
+    // remove from weekly if adding to monthly
+    const nk=fixedKeys.filter(x=>x!==k);
+    onChange({...fixed,fixedKeys:nk,monthlyFixedKeys:nm});
+  };
   const renameKey=(key,nl)=>{if(onSettingsChange){const nk=keys.map(k=>k.key===key?{...k,label:nl}:k);onSettingsChange({...settings,opexKeys:nk});}};
-  const renderGroup=(groupKeys,titleLabelKey)=>(
-    <div style={{marginBottom:20}}>
-      <SH sub><E value={labels[titleLabelKey]||groupKeys[0]?.group||"Group"} onSave={v=>labels._save(titleLabelKey,v)} style={{color:MU,fontFamily:ff,fontSize:9}}/></SH>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10}}>
-        {groupKeys.map(({key,label})=>{
-          const isF=fixedKeys.includes(key);
+
+  const weeklyTotal=displayKeys.reduce((s,{key})=>s+n(fixed?.values?.[key]||0),0);
+  const monthlyTotal=displayKeys.reduce((s,{key})=>s+n(fixed?.monthlyValues?.[key]||0),0);
+  const weeklyFromMonthly=monthlyTotal/4;
+  const totalWeeklyImpact=weeklyTotal+weeklyFromMonthly;
+
+  const renderGroup=(groupKeys,titleLabelKey,part)=>(
+    <div style={{marginBottom:16}}>
+      <SH sub><E value={labels[titleLabelKey]||groupKeys[0]?.group||"Group"} onSave={v=>labels._save(titleLabelKey,v)} style={{color:"inherit",fontFamily:ff}}/></SH>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
+        {groupKeys.filter(k=>!k.sub).map(({key,label})=>{
+          const isW=fixedKeys.includes(key);
+          const isM=monthlyFixedKeys.includes(key);
+          const isActive=part==="weekly"?isW:isM;
+          const val=part==="weekly"?(fixed?.values?.[key]||""):(fixed?.monthlyValues?.[key]||"");
+          const weeklyAmt=isM?n(fixed?.monthlyValues?.[key]||0)/4:0;
           return(
-            <div key={key} style={{background:isF?"#1c1730":S2,border:"1px solid "+(isF?A:BR),borderRadius:radius+1,padding:"10px 12px"}}>
+            <div key={key} style={{background:isActive?A+"22":S2,border:"1px solid "+(isActive?A:BR),borderRadius:radius+1,padding:"10px 12px"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                <E value={label} onSave={nl=>renameKey(key,nl)} style={{fontFamily:ff,fontSize:11,color:isF?A:MU,textTransform:"uppercase",letterSpacing:0.8}}/>
-                <button onClick={()=>toggle(key)} style={{background:isF?A:"transparent",border:"1px solid "+(isF?A:BR),color:isF?"#000":MU,padding:"2px 8px",fontFamily:ff,fontSize:10,cursor:"pointer",borderRadius:radius,letterSpacing:1,whiteSpace:"nowrap",marginLeft:8}}>
-                  {isF?"FIXED":"SET FIXED"}
+                <E value={label} onSave={nl=>renameKey(key,nl)} style={{fontFamily:ff,fontSize:11,color:isActive?A:MU,textTransform:"uppercase",letterSpacing:0.8}}/>
+                <button
+                  onClick={()=>part==="weekly"?toggleWeekly(key):toggleMonthly(key)}
+                  style={{background:isActive?A:"transparent",border:"1px solid "+(isActive?A:BR),color:isActive?"#ffffff":MU,padding:"2px 8px",fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,whiteSpace:"nowrap",marginLeft:8,textTransform:"uppercase"}}>
+                  {isActive?"Active":"Set"}
                 </button>
               </div>
-              <CI value={fixed?.values?.[key]||""} onChange={v=>onChange({...fixed,values:{...fixed.values,[key]:v}})}/>
+              <CI value={val} onChange={v=>part==="weekly"
+                ?onChange({...fixed,values:{...(fixed.values||{}), [key]:v}})
+                :onChange({...fixed,monthlyValues:{...(fixed.monthlyValues||{}), [key]:v}})}/>
+              {part==="monthly"&&isM&&weeklyAmt>0&&(
+                <div style={{fontFamily:ff,fontSize:9,color:A,marginTop:4}}>= {fmtD(weeklyAmt)}/week</div>
+              )}
             </div>
           );
         })}
       </div>
     </div>
   );
+
+  const renderPart=(title,subtitle,part,accentColor)=>(
+    <div style={{background:S,border:"2px solid "+(accentColor||A)+"44",borderRadius:radius+4,padding:"20px 24px",marginBottom:24}}>
+      <div style={{marginBottom:4}}>
+        <div style={{fontFamily:ff,fontSize:11,letterSpacing:2,color:accentColor||A,textTransform:"uppercase",fontWeight:"bold",marginBottom:4}}>{title}</div>
+        <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:16,lineHeight:1.6}}>{subtitle}</div>
+      </div>
+      {renderGroup(displayKeys.filter(k=>k.group==="freight"),"sec_freight",part)}
+      {renderGroup(displayKeys.filter(k=>k.group==="collabs"),"sec_collabs",part)}
+      {renderGroup(displayKeys.filter(k=>k.group==="general"),"sec_general",part)}
+    </div>
+  );
+
   return(
     <div>
-      <div style={{fontFamily:ff,fontSize:13,color:MU,marginBottom:20,lineHeight:1.8}}>
-        <E value={labels.fixed_help} onSave={v=>labels._save("fixed_help",v)} style={{fontFamily:ff,fontSize:13,color:MU}} multiline/>
-      </div>
-      <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+1,padding:"12px 16px",marginBottom:20}}>
+      {/* Satchel cost */}
+      <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+1,padding:"12px 16px",marginBottom:24}}>
         <div style={{fontFamily:ff,fontSize:10,letterSpacing:1.5,color:A,textTransform:"uppercase",marginBottom:10}}>
           <E value={labels.fixed_satchel_label} onSave={v=>labels._save("fixed_satchel_label",v)} style={{color:A,fontFamily:ff,fontSize:10}}/>
         </div>
@@ -833,14 +1464,31 @@ function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,label
           </span>
         </div>
       </div>
-      {renderGroup(keys.filter(k=>k.group==="freight"),"sec_freight")}
-      {renderGroup(keys.filter(k=>k.group==="collabs"),"sec_collabs")}
-      {renderGroup(keys.filter(k=>k.group==="general"),"sec_general")}
-      <div style={{marginTop:16,padding:"12px 16px",background:S2,border:"1px solid "+BR,borderRadius:radius+1}}>
-        <span style={{fontFamily:ff,fontSize:13,color:MU}}>Monthly fixed total: </span>
-        <span style={{fontFamily:ff,fontSize:15,color:A,fontWeight:"bold"}}>{fmtD(total)}</span>
-        <span style={{fontFamily:ff,fontSize:12,color:MU,marginLeft:12}}>({fmtD(total/4.33)} /wk avg)</span>
-        <span style={{fontFamily:ff,fontSize:12,color:A,marginLeft:16}}>{fixedKeys.length} items auto-populate weekly</span>
+
+      {renderPart("Part 1 — Weekly Fixed Costs","Costs that recur every week at the same amount. Each active item auto-fills the weekly input at its full value.","weekly",A)}
+
+      {renderPart("Part 2 — Monthly Fixed Costs","Costs billed monthly. Each active item auto-fills the weekly input at 1/4 of the monthly amount, shown below the field.","monthly","#7dd3fc")}
+
+      {/* Summary */}
+      <div style={{padding:"16px 20px",background:S2,border:"1px solid "+BR,borderRadius:radius+2}}>
+        <div style={{fontFamily:ff,fontSize:10,letterSpacing:1.5,color:A,textTransform:"uppercase",marginBottom:12}}>Weekly Cost Summary</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12}}>
+          <div style={{background:BG,borderRadius:radius,padding:"10px 14px",borderLeft:"3px solid "+A}}>
+            <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:4}}>Weekly Fixed ({fixedKeys.length} items)</div>
+            <div style={{fontFamily:ff,fontSize:16,color:A,fontWeight:"bold"}}>{fmtD(weeklyTotal)}</div>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>fills at full amount each week</div>
+          </div>
+          <div style={{background:BG,borderRadius:radius,padding:"10px 14px",borderLeft:"3px solid "+A}}>
+            <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:4}}>Monthly Fixed ({monthlyFixedKeys.length} items)</div>
+            <div style={{fontFamily:ff,fontSize:16,color:A,fontWeight:"bold"}}>{fmtD(monthlyTotal)}/mo</div>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>{fmtD(weeklyFromMonthly)}/week (÷4)</div>
+          </div>
+          <div style={{background:BG,borderRadius:radius,padding:"10px 14px",borderLeft:"3px solid "+GR}}>
+            <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:4}}>Total Weekly Auto-Fill</div>
+            <div style={{fontFamily:ff,fontSize:16,color:GR,fontWeight:"bold"}}>{fmtD(totalWeeklyImpact)}</div>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>auto-applied to every week</div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -849,32 +1497,38 @@ function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,label
 // ─── Settings Page ────────────────────────────────────────────────────────────
 const FONT_OPTIONS=["Times New Roman","Georgia","Garamond","Palatino","Helvetica","Arial","Inter","system-ui","monospace","Courier New"];
 const COLOR_PRESETS=[
-  {name:"Default",theme:{accent:"#d8b9ff",bg:"#0a0a0e",surface:"#12111a",surface2:"#1a1826",border:"#2a2540",text:"#e0e0e0",muted:"#777777",red:"#ff6b6b",green:"#6bffb8",yellow:"#ffd97d"}},
-  {name:"Deep Ocean",theme:{accent:"#7dd3fc",bg:"#020617",surface:"#0f172a",surface2:"#1e293b",border:"#334155",text:"#e2e8f0",muted:"#64748b",red:"#f87171",green:"#34d399",yellow:"#fbbf24"}},
-  {name:"Forest",theme:{accent:"#86efac",bg:"#030712",surface:"#0f1b12",surface2:"#172018",border:"#2d4a32",text:"#dcfce7",muted:"#6b7280",red:"#fca5a5",green:"#86efac",yellow:"#fde68a"}},
-  {name:"Rose",theme:{accent:"#fda4af",bg:"#0c0a0b",surface:"#1a1016",surface2:"#231520",border:"#4a2030",text:"#fce7f3",muted:"#9d8090",red:"#fb7185",green:"#6ee7b7",yellow:"#fde68a"}},
-  {name:"Slate",theme:{accent:"#94a3b8",bg:"#0f0f0f",surface:"#161616",surface2:"#1e1e1e",border:"#2a2a2a",text:"#d4d4d4",muted:"#737373",red:"#f87171",green:"#86efac",yellow:"#fcd34d"}},
+  {name:"Default",theme:{accent:"#d8b9ff",bg:"#0a0a0e",surface:"#12111a",surface2:"#1a1826",border:"#2a2540",text:"#e0e0e0",muted:"#777777",red:"#ff6b6b",green:"#6bffb8",yellow:"#ffd97d",lightness:50}},
+  {name:"Notion Light",theme:{accent:"#2383e2",bg:"#ffffff",surface:"#f7f7f5",surface2:"#efefef",border:"#e3e2e0",text:"#191919",muted:"#9b9b9b",red:"#eb5757",green:"#0f9153",yellow:"#d9730d",lightness:50,bodyFont:"Inter",titleFont:"Inter",borderRadius:6}},
+  {name:"Deep Ocean",theme:{accent:"#7dd3fc",bg:"#020617",surface:"#0f172a",surface2:"#1e293b",border:"#334155",text:"#e2e8f0",muted:"#64748b",red:"#f87171",green:"#34d399",yellow:"#fbbf24",lightness:50}},
+  {name:"Forest",theme:{accent:"#86efac",bg:"#030712",surface:"#0f1b12",surface2:"#172018",border:"#2d4a32",text:"#dcfce7",muted:"#6b7280",red:"#fca5a5",green:"#86efac",yellow:"#fde68a",lightness:50}},
+  {name:"Rose",theme:{accent:"#fda4af",bg:"#0c0a0b",surface:"#1a1016",surface2:"#231520",border:"#4a2030",text:"#fce7f3",muted:"#9d8090",red:"#fb7185",green:"#6ee7b7",yellow:"#fde68a",lightness:50}},
+  {name:"Slate",theme:{accent:"#94a3b8",bg:"#0f0f0f",surface:"#161616",surface2:"#1e1e1e",border:"#2a2a2a",text:"#d4d4d4",muted:"#737373",red:"#f87171",green:"#86efac",yellow:"#fcd34d",lightness:50}},
 ];
 
-function SettingsPage({settings,onSettingsChange,theme,onThemeChange}){
-  const {S2,BR,A,MU,TX,GR,RD,ff,radius}=useTheme();
+function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLabelsSave}){
+  const {S2,BR,A,MU,TX,GR,RD,YL,ff,radius}=useTheme();
   const [themeEdit,setThemeEdit]=useState({...DEFAULT_THEME,...theme});
   const [activeTab,setActiveTab]=useState("appearance");
   const [staff,setStaff]=useState(settings?.staff||DEFAULT_STAFF);
+  const [targets,setTargets]=useState(labels?._targets||DEFAULT_TARGETS);
   const [saved,setSaved]=useState(false);
+  // Keep targets in sync when labels (loaded from storage) update
+  useEffect(()=>{if(labels?._targets)setTargets({...DEFAULT_TARGETS,...labels._targets});},[labels?._targets]);
   const apply=()=>{onThemeChange(themeEdit);setSaved(true);setTimeout(()=>setSaved(false),2000);};
   const reset=()=>{setThemeEdit({...DEFAULT_THEME});onThemeChange({...DEFAULT_THEME});};
   const updateStaff=ns=>{setStaff(ns);onSettingsChange({...settings,staff:ns});};
   const addStaff=()=>updateStaff([...staff,{id:"s"+Date.now(),name:"New Staff",type:"casual",hourlyRate:25,hoursPerWeek:20,dept:"ops_retail"}]);
   const removeStaff=id=>updateStaff(staff.filter(s=>s.id!==id));
   const editStaff=(id,f,v)=>updateStaff(staff.map(s=>s.id===id?{...s,[f]:v}:s));
+  const saveTargets=nt=>{setTargets(nt);if(onLabelsSave)onLabelsSave("_targets",nt);};
   const inp={background:S2,border:"1px solid "+BR,color:TX,padding:"7px 10px",fontFamily:ff,fontSize:13,outline:"none",borderRadius:radius,width:"100%",boxSizing:"border-box"};
+  const numInp={...inp,width:90,textAlign:"right"};
   return(
     <div>
-      <div style={{display:"flex",gap:8,marginBottom:24}}>
-        {["appearance","colours","staff"].map(t=>(
+      <div style={{display:"flex",gap:8,marginBottom:24,flexWrap:"wrap"}}>
+        {["appearance","colours","targets","staff"].map(t=>(
           <button key={t} onClick={()=>setActiveTab(t)}
-            style={{padding:"8px 16px",background:activeTab===t?A:"transparent",border:"1px solid "+(activeTab===t?A:BR),color:activeTab===t?"#000":MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
+            style={{padding:"8px 16px",background:activeTab===t?A:"transparent",border:"1px solid "+(activeTab===t?A:BR),color:activeTab===t?"#ffffff":MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
             {t}
           </button>
         ))}
@@ -886,6 +1540,25 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange}){
             <Fld label="Title Font"><select value={themeEdit.titleFont||"Times New Roman"} onChange={e=>setThemeEdit({...themeEdit,titleFont:e.target.value})} style={inp}>{FONT_OPTIONS.map(f=><option key={f} value={f}>{f}</option>)}</select></Fld>
             <Fld label="Body Font"><select value={themeEdit.bodyFont||"Times New Roman"} onChange={e=>setThemeEdit({...themeEdit,bodyFont:e.target.value})} style={inp}>{FONT_OPTIONS.map(f=><option key={f} value={f}>{f}</option>)}</select></Fld>
           </Grid>
+          <SH>Title Sizes</SH>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:4}}>
+            {[
+              {key:"headerTitleSize",label:"Dashboard Title",default:22,min:14,max:48},
+              {key:"headerBrandSize",label:"Brand Subtitle",default:9,min:7,max:18},
+              {key:"sectionHeaderSize",label:"Section Headers",default:10,min:8,max:20},
+              {key:"subSectionSize",label:"Sub-Section Headers",default:9,min:7,max:16},
+            ].map(({key,label,default:def,min,max})=>(
+              <div key={key} style={{marginBottom:8}}>
+                <div style={{fontFamily:ff,fontSize:10,color:MU,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>{label}</div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <input type="range" min={min} max={max} value={themeEdit[key]??def}
+                    onChange={e=>setThemeEdit({...themeEdit,[key]:parseInt(e.target.value)})}
+                    style={{flex:1}}/>
+                  <span style={{fontFamily:ff,fontSize:12,color:TX,minWidth:32,textAlign:"right"}}>{themeEdit[key]??def}px</span>
+                </div>
+              </div>
+            ))}
+          </div>
           <SH>Border Radius</SH>
           <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:20}}>
             <input type="range" min={0} max={16} value={themeEdit.borderRadius??4} onChange={e=>setThemeEdit({...themeEdit,borderRadius:parseInt(e.target.value)})} style={{flex:1}}/>
@@ -910,7 +1583,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange}){
             ))}
           </div>
           <div style={{display:"flex",gap:10}}>
-            <button onClick={apply} style={{flex:1,padding:"11px 0",background:A,border:"none",color:"#000",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>{saved?"APPLIED!":"APPLY"}</button>
+            <button onClick={apply} style={{flex:1,padding:"11px 0",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>{saved?"APPLIED!":"APPLY"}</button>
             <button onClick={reset} style={{padding:"11px 20px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius}}>Reset</button>
           </div>
         </div>
@@ -929,7 +1602,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange}){
               </div>
             ))}
           </Grid>
-          <button onClick={apply} style={{marginTop:16,width:"100%",padding:"11px 0",background:A,border:"none",color:"#000",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>{saved?"APPLIED!":"APPLY COLOURS"}</button>
+          <button onClick={apply} style={{marginTop:16,width:"100%",padding:"11px 0",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>{saved?"APPLIED!":"APPLY COLOURS"}</button>
         </div>
       )}
       {activeTab==="staff"&&(
@@ -954,16 +1627,89 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange}){
           </div>
         </div>
       )}
+      {activeTab==="targets"&&(
+        <div>
+          <div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:20,lineHeight:1.8}}>Set your financial targets. These auto-calculate against actuals every week and month, showing coloured progress bars and alerts.</div>
+          <SH>Margin Targets</SH>
+          <Grid>
+            {[
+              {key:"gross_margin_target",label:"Gross Margin Target (%)",hint:"Industry: 50–65%"},
+              {key:"net_margin_target",label:"Net Margin Target (%)",hint:"Healthy: 12–20%"},
+            ].map(({key,label,hint})=>(
+              <div key={key}>
+                <Fld label={<span style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:0.7}}>{label}</span>}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <input type="number" value={targets[key]||""} onChange={e=>saveTargets({...targets,[key]:parseFloat(e.target.value)||0})} style={{...inp,width:80,textAlign:"right"}}/>
+                    <span style={{fontFamily:ff,fontSize:10,color:MU}}>%</span>
+                  </div>
+                </Fld>
+                <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:3}}>{hint}</div>
+              </div>
+            ))}
+          </Grid>
+          <SH>Cost Targets (% of Net Revenue)</SH>
+          <Grid>
+            {[
+              {key:"cogs_pct_target",label:"Max COGS %",hint:"Target: ≤35–45%"},
+              {key:"opex_pct_target",label:"Max OPEX %",hint:"Target: ≤20–30%"},
+              {key:"wages_pct_target",label:"Max Wages %",hint:"Target: ≤15–25%"},
+            ].map(({key,label,hint})=>(
+              <div key={key}>
+                <Fld label={<span style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:0.7}}>{label}</span>}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <input type="number" value={targets[key]||""} onChange={e=>saveTargets({...targets,[key]:parseFloat(e.target.value)||0})} style={{...inp,width:80,textAlign:"right"}}/>
+                    <span style={{fontFamily:ff,fontSize:10,color:MU}}>%</span>
+                  </div>
+                </Fld>
+                <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:3}}>{hint}</div>
+              </div>
+            ))}
+          </Grid>
+          <SH>Discount Alerts</SH>
+          <Grid>
+            {[
+              {key:"promo_disc_rate_max",label:"Max Promo Discount Rate (%)",hint:"% of gross sales — above this triggers alert"},
+              {key:"refund_rate_max",label:"Max Refund Rate (%)",hint:"% of gross sales"},
+            ].map(({key,label,hint})=>(
+              <div key={key}>
+                <Fld label={<span style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:0.7}}>{label}</span>}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <input type="number" value={targets[key]||""} onChange={e=>saveTargets({...targets,[key]:parseFloat(e.target.value)||0})} style={{...inp,width:80,textAlign:"right"}}/>
+                    <span style={{fontFamily:ff,fontSize:10,color:MU}}>%</span>
+                  </div>
+                </Fld>
+                <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:3}}>{hint}</div>
+              </div>
+            ))}
+          </Grid>
+          <SH>Service Recovery Thresholds</SH>
+          <Grid>
+            {[
+              {key:"service_recovery_max_orders",label:"Max Service Recovery Orders / Week",hint:"Above this, alert fires"},
+              {key:"service_recovery_cost_alert",label:"Alert if Cost Per Order Exceeds ($)",hint:"Average cost per service recovery order"},
+            ].map(({key,label,hint})=>(
+              <div key={key}>
+                <Fld label={<span style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:0.7}}>{label}</span>}>
+                  <input type="number" value={targets[key]||""} onChange={e=>saveTargets({...targets,[key]:parseFloat(e.target.value)||0})} style={{...inp,width:100,textAlign:"right"}}/>
+                </Fld>
+                <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:3}}>{hint}</div>
+              </div>
+            ))}
+          </Grid>
+          <button onClick={()=>saveTargets({...DEFAULT_TARGETS})} style={{marginTop:16,padding:"8px 18px",background:"transparent",border:"1px solid "+MU,color:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius}}>Reset to defaults</button>
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Monthly Overview ─────────────────────────────────────────────────────────
-function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opexKeys,depts,labels}){
-  const {S2,BR,A,MU,TX,ff,RD,GR,radius}=useTheme();
+function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opexKeys,depts,labels,monthKey}){
+  const {S,S2,BR,A,MU,TX,ff,RD,GR,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   const mc=calcMonth(weeks,fixed,extras,keys,wDepts);
+  const monthDateRange=weeks.length>0?weeks[0].dateRange.split(" - ")[0]+" — "+weeks[weeks.length-1].dateRange.split(" - ")[1]:"";
   const [part2,setPart2]=useState(false);
   const [sumCopied,setSumCopied]=useState(false);
 
@@ -971,17 +1717,17 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
   const totalDR=mc.weekCalcs.reduce((s,c)=>({
     serviceRecoveryCOGS:s.serviceRecoveryCOGS+(c.discReclass?.serviceRecoveryCOGS||0),
     serviceRecoveryOrders:s.serviceRecoveryOrders+(c.discReclass?.serviceRecoveryOrders||0),
-    marketingDiscRetail:s.marketingDiscRetail+(c.discReclass?.marketingDiscRetail||0),
+    marketingDisc:s.marketingDisc+(c.discReclass?.marketingDisc||0),
     staffDisc:s.staffDisc+(c.discReclass?.staffDisc||0),
     promoDisc:s.promoDisc+(c.discReclass?.promoDisc||0),
     totalDisc:s.totalDisc+c.totalDiscounts,
-  }),{serviceRecoveryCOGS:0,serviceRecoveryOrders:0,marketingDiscRetail:0,staffDisc:0,promoDisc:0,totalDisc:0});
+  }),{serviceRecoveryCOGS:0,serviceRecoveryOrders:0,marketingDisc:0,staffDisc:0,promoDisc:0,totalDisc:0});
 
   const copySummary=()=>{
     const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
     let t="## Monthly P&L Summary\n\n**Net Revenue:** "+fmt(mc.netRevenue)+"\n**Gross Profit:** "+fmt(mc.grossProfit)+" ("+mc.grossMargin.toFixed(1)+"%)\n**Total Expenses:** "+fmt(mc.totalExpenses)+"\n**Net Profit:** "+fmt(mc.netProfit)+" ("+mc.netMargin.toFixed(1)+"%)\n\n";
     t+="### Discount Reclassification\n";
-    t+="Shopify gifting artefact (retail, ref only): "+fmt(totalDR.marketingDiscRetail)+" | Service Recovery: "+fmt(totalDR.serviceRecoveryCOGS)+" | Staff: "+fmt(totalDR.staffDisc)+" | True Promo: "+fmt(totalDR.promoDisc)+"\n\n";
+    t+="Service Recovery: "+fmt(totalDR.serviceRecoveryCOGS)+" | Marketing: "+fmt(totalDR.marketingDisc)+" | Staff: "+fmt(totalDR.staffDisc)+" | True Promo: "+fmt(totalDR.promoDisc)+"\n\n";
     t+="### Week Breakdown\n";
     weeks.forEach((w,i)=>{const c=mc.weekCalcs[i];t+="**"+w.label+"** ("+w.dateRange+") - Rev: "+fmt(c.netRevenue)+" | GP: "+c.grossMargin.toFixed(1)+"% | Net: "+fmt(c.netProfit)+" ("+c.netMargin.toFixed(1)+"%)\n";});
     navigator.clipboard.writeText(t);setSumCopied(true);setTimeout(()=>setSumCopied(false),3000);
@@ -992,8 +1738,8 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
       <div style={{display:"flex",gap:8,marginBottom:20}}>
         {[{key:"overview_part1",label:labels.overview_part1,i:0},{key:"overview_part2",label:labels.overview_part2,i:1}].map(({key,label,i})=>(
           <button key={i} onClick={()=>setPart2(i===1)}
-            style={{padding:"8px 16px",background:part2===(i===1)?A:"transparent",border:"1px solid "+(part2===(i===1)?A:BR),color:part2===(i===1)?"#000":MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
-            <E value={label} onSave={v=>labels._save(key,v)} style={{fontFamily:ff,fontSize:11,color:part2===(i===1)?"#000":MU}}/>
+            style={{padding:"8px 16px",background:part2===(i===1)?A:"transparent",border:"1px solid "+(part2===(i===1)?A:BR),color:part2===(i===1)?"#ffffff":MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
+            <E value={label} onSave={v=>labels._save(key,v)} style={{fontFamily:ff,fontSize:11,color:part2===(i===1)?"#ffffff":MU}}/>
           </button>
         ))}
       </div>
@@ -1001,6 +1747,7 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
       {!part2&&(
         <div>
           <SH>Monthly P&L Summary</SH>
+          {monthDateRange&&<div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:16,marginTop:-8}}>{monthDateRange}</div>}
           <Row>
             <Badge label="Net Revenue" value={mc.netRevenue} color={A}/>
             <Badge label="Gross Profit" value={mc.grossProfit}/>
@@ -1009,26 +1756,27 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
           </Row>
           <Row><Pct label="Gross Margin" value={mc.grossMargin}/><Pct label="Net Margin" value={mc.netMargin}/></Row>
 
+          {/* Discount reclassification summary for the month */}
           <Accordion title="Discount Reclassification Summary" accent>
             <div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:14,lineHeight:1.7}}>
-              Monthly breakdown of how {fmtD(totalDR.totalDisc)} in total Shopify-recorded discounts are understood. The influencer gifting figure is a Shopify artefact — its real cost is already in Collab COGS.
+              Monthly breakdown of how the {fmtD(totalDR.totalDisc)} in total discounts were reclassified across expense categories.
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:12}}>
               {[
-                {label:"True Promotional (→ Revenue Deduction)",val:totalDR.promoDisc,col:GR,sub:"only this bucket reduces Net Revenue"},
-                {label:"Service Recovery (→ COGS)",val:totalDR.serviceRecoveryCOGS,col:RD,sub:totalDR.serviceRecoveryOrders+" orders — reclassified as operational cost"},
+                {label:"Service Recovery (→ COGS)",val:totalDR.serviceRecoveryCOGS,col:RD,sub:totalDR.serviceRecoveryOrders+" orders"},
+                {label:"Influencer / Marketing (→ OPEX)",val:totalDR.marketingDisc,col:"#ffd97d",sub:"reclassified as marketing expense"},
                 {label:"Staff Benefits (→ Wages)",val:totalDR.staffDisc,col:A,sub:"reclassified as staff benefit"},
-                {label:"Influencer Gifting — Shopify retail artefact",val:totalDR.marketingDiscRetail,col:"#ffd97d",sub:"REFERENCE ONLY — zero P&L impact. Real cost (unit COGS) is in Collab COGS."},
+                {label:"True Promotional (→ Revenue Deduction)",val:totalDR.promoDisc,col:GR,sub:"this is the only bucket reducing Net Revenue"},
               ].map(({label,val,col,sub})=>(
-                <div key={label} style={{background:"#12111a",border:"1px solid "+col+"44",borderRadius:radius+1,padding:"12px 14px"}}>
+                <div key={label} style={{background:S2,border:"1px solid "+col+"44",borderRadius:radius+1,padding:"12px 14px"}}>
                   <div style={{fontFamily:ff,fontSize:10,color:col,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>{label}</div>
                   <div style={{fontFamily:ff,fontSize:18,color:col,fontWeight:"bold"}}>{fmtD(val)}</div>
                   <div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:4}}>{sub}</div>
                 </div>
               ))}
             </div>
-            <div style={{fontFamily:ff,fontSize:12,color:MU,padding:"10px 14px",background:"#1a1826",borderRadius:radius+1,borderLeft:"3px solid "+A}}>
-              Net Revenue is only reduced by {fmtD(totalDR.promoDisc)} in true promotional discounts. The {fmtD(totalDR.marketingDiscRetail)} gifting figure is a Shopify checkout artefact — it was never real revenue and costs the business only the manufacturing COGS of those units, already recorded in Collab COGS.
+            <div style={{fontFamily:ff,fontSize:12,color:MU,padding:"10px 14px",background:S2,borderRadius:radius+1,borderLeft:"3px solid "+A}}>
+              Without reclassification your Net Revenue would have been reduced by {fmtD(totalDR.serviceRecoveryCOGS+totalDR.marketingDisc+totalDR.staffDisc)} more than it should be. True P&L separates operational failure costs from genuine commercial discounting.
             </div>
           </Accordion>
 
@@ -1073,7 +1821,7 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
           </div>
 
           <SH>Expense Breakdown</SH>
-          {[["COGS (incl. service recovery)",mc.totalCOGS,"#ff9ecd"],["Freight",mc.totalFreight,RD],["Collabs (incl. gifting COGS)",mc.totalCollabs,"#ffd97d"],["Wages (incl. staff disc)",mc.totalWages,"#e0a0ff"],["OPEX",mc.totalOPEX,A]].map(([lbl,val,col])=>(
+          {[["COGS (incl. service recovery)",mc.totalCOGS,"#ff9ecd"],["Freight",mc.totalFreight,RD],["Collabs",mc.totalCollabs,"#ffd97d"],["Wages (incl. staff disc)",mc.totalWages,"#e0a0ff"],["OPEX (incl. influencer gifting)",mc.totalOPEX,A]].map(([lbl,val,col])=>(
             <div key={lbl} style={{marginBottom:10}}>
               <div style={{display:"flex",justifyContent:"space-between",fontFamily:ff,fontSize:12,marginBottom:4}}>
                 <span style={{color:TX}}>{lbl}</span>
@@ -1112,7 +1860,7 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
           <Row><Badge small label="Monthly Adjustment Total" value={-mc.extraOpex} color={RD}/></Row>
           <SH>Notes</SH>
           <textarea value={extras?.notes||""} onChange={e=>onExtrasChange({...extras,notes:e.target.value})} placeholder="Monthly context, one-off costs..." rows={3}
-            style={{width:"100%",boxSizing:"border-box",background:"#12111a",border:"1px solid "+BR,color:TX,padding:"10px 12px",fontFamily:ff,fontSize:14,outline:"none",borderRadius:radius,resize:"vertical"}}/>
+            style={{width:"100%",boxSizing:"border-box",background:S2,border:"1px solid "+BR,color:TX,padding:"10px 12px",fontFamily:ff,fontSize:14,outline:"none",borderRadius:radius,resize:"vertical"}}/>
           <Row>
             <Badge small label="Net Revenue" value={mc.netRevenue} color={A}/>
             <Badge small label="Total Expenses" value={-mc.totalExpenses} color={RD}/>
@@ -1139,7 +1887,7 @@ function VisualisePage({weeks,fixed,allMonthData,opexKeys,depts}){
   ];
   const discMetrics=[
     {id:"disc_sr",label:"Service Recovery Cost",isDR:true,drKey:"serviceRecoveryCOGS"},
-    {id:"disc_mkt",label:"Influencer Gifting — Shopify retail artefact (ref only)",isDR:true,drKey:"marketingDiscRetail"},
+    {id:"disc_mkt",label:"Marketing / Influencer Gifting",isDR:true,drKey:"marketingDisc"},
     {id:"disc_staff",label:"Staff Discount Benefits",isDR:true,drKey:"staffDisc"},
   ];
   const wageMetrics=wDepts.flatMap(d=>d.subs.map(s=>({id:"wage_"+s.key,label:d.label+" - "+s.label,isWage:true,wageKey:s.key})));
@@ -1270,14 +2018,14 @@ function ComparePage({allMonthData,fixed,opexKeys,depts,labels}){
 
   return(
     <div>
-      <SH><E value={labels.compare_title} onSave={v=>labels._save("compare_title",v)} style={{color:A,fontFamily:ff,fontSize:10}}/></SH>
+      <SH><E value={labels.compare_title} onSave={v=>labels._save("compare_title",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
       <div style={{fontFamily:ff,fontSize:13,color:MU,marginBottom:20}}>
         <E value={labels.compare_help} onSave={v=>labels._save("compare_help",v)} style={{color:MU,fontFamily:ff,fontSize:13}}/>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:24}}>
         {[["months","By Month"],["weeks","By Week"],["custom","Custom Range"]].map(([val,lbl])=>(
           <button key={val} onClick={()=>setMode(val)}
-            style={{padding:"7px 14px",background:mode===val?A:"transparent",border:"1px solid "+(mode===val?A:BR),color:mode===val?"#000":MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
+            style={{padding:"7px 14px",background:mode===val?A:"transparent",border:"1px solid "+(mode===val?A:BR),color:mode===val?"#ffffff":MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
             {lbl}
           </button>
         ))}
@@ -1438,10 +2186,10 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts}){
               </div>
             </div>
             {delConfirm===key&&(
-              <div style={{padding:"16px 18px",background:"#1a0a0a",border:"1px solid "+RD,margin:"0 0 4px"}}>
+              <div style={{padding:"16px 18px",background:RD+"15",border:"1px solid "+RD,margin:"0 0 4px"}}>
                 <div style={{fontFamily:ff,fontSize:13,color:RD,marginBottom:12}}>Delete {mLabel}? This cannot be undone.</div>
                 <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>deleteMonth(key)} style={{padding:"8px 16px",background:RD,border:"none",color:"#000",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold"}}>Delete</button>
+                  <button onClick={()=>deleteMonth(key)} style={{padding:"8px 16px",background:RD,border:"none",color:"#ffffff",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold"}}>Delete</button>
                   <button onClick={()=>setDelConfirm(null)} style={{padding:"8px 16px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius}}>Cancel</button>
                 </div>
               </div>
@@ -1466,7 +2214,7 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts}){
                     )}
                     <div style={{display:"flex",gap:10,marginTop:16}}>
                       <button onClick={()=>saveEdit(key)} disabled={saving}
-                        style={{flex:1,padding:"11px 0",background:A,border:"none",color:"#000",fontFamily:ff,fontSize:13,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
+                        style={{flex:1,padding:"11px 0",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:13,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
                         {saving?"SAVING...":"SAVE CHANGES"}
                       </button>
                       <button onClick={()=>{setEditing(null);setEditWeeks(null);}}
@@ -1504,6 +2252,236 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts}){
   );
 }
 
+// ─── Targets Page ─────────────────────────────────────────────────────────────
+function TargetsPage({weeks,curWeeks,onUpdateWeeks,activeWeek,labels,monthData,selMonthKey}){
+  const {S,S2,BR,A,MU,TX,GR,RD,YL,BG,ff,radius}=useTheme();
+
+  // Global targets = labels._targets (persisted in settings)
+  const globalTargets=labels._targets||DEFAULT_TARGETS;
+
+  // Per-week targets: stored in week.weekTargets, falls back to global
+  const week=curWeeks[activeWeek]||curWeeks[0];
+  const wt=week?.weekTargets||{...globalTargets};
+
+  const saveWeekTargets=nt=>{
+    const nw=[...curWeeks];
+    nw[activeWeek]={...nw[activeWeek],weekTargets:nt};
+    onUpdateWeeks(nw);
+  };
+  const saveGlobalTargets=nt=>labels._save("_targets",nt);
+
+  // Monthly sales goal → auto-calculate weekly targets
+  const [monthlyGoal,setMonthlyGoal]=useState(wt.monthly_sales_goal||"");
+  const weeklyGoal=parseFloat(monthlyGoal)/4.33||0;
+
+  const autoCalc=()=>{
+    const goal=parseFloat(monthlyGoal);
+    if(!goal||goal<=0)return;
+    const wkly=goal/4.33;
+    // Use current global targets for percentages, falling back to defaults
+    const gt=globalTargets;
+    const grossM=gt.gross_margin_target||55;
+    const netM=gt.net_margin_target||15;
+    const cogsP=gt.cogs_pct_target||35;
+    const opexP=gt.opex_pct_target||25;
+    const wagesP=gt.wages_pct_target||20;
+    const nt={
+      ...gt,
+      monthly_sales_goal:goal,
+      weekly_revenue_target:Math.round(wkly),
+      gross_margin_target:grossM,
+      net_margin_target:netM,
+      cogs_pct_target:cogsP,
+      opex_pct_target:opexP,
+      wages_pct_target:wagesP,
+      promo_disc_rate_max:gt.promo_disc_rate_max||12,
+      refund_rate_max:gt.refund_rate_max||3,
+      service_recovery_max_orders:gt.service_recovery_max_orders||5,
+      service_recovery_cost_alert:gt.service_recovery_cost_alert||50,
+      weekly_cogs_max:Math.round(wkly*cogsP/100),
+      weekly_opex_max:Math.round(wkly*opexP/100),
+      weekly_wages_max:Math.round(wkly*wagesP/100),
+      weekly_profit_target:Math.round(wkly*netM/100),
+    };
+    // Save to every week so targets show immediately across all weeks
+    const nw=curWeeks.map(w=>({...w,weekTargets:nt}));
+    onUpdateWeeks(nw);
+    saveGlobalTargets(nt);
+  };
+
+  // Current week actuals
+  const fixed=null; // not available here, pass via prop if needed
+  const inp={background:S2,border:"1px solid "+BR,color:TX,padding:"7px 10px",fontFamily:ff,fontSize:13,outline:"none",borderRadius:radius,width:"100%",boxSizing:"border-box"};
+
+  const renderTRow=(label,key_,unit="%",hint)=>{
+    const val=wt[key_]??globalTargets[key_]??"";
+    const isOverride=week?.weekTargets?.[key_]!==undefined;
+    return(
+      <div key={key_} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:"1px solid "+BR+"33"}}>
+        <div style={{flex:1}}>
+          <div style={{fontFamily:ff,fontSize:12,color:TX}}>{label}</div>
+          {hint&&<div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>{hint}</div>}
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          {isOverride&&<span style={{fontFamily:ff,fontSize:9,color:YL,textTransform:"uppercase",letterSpacing:0.5}}>weekly</span>}
+          <input type="number" value={val} onChange={e=>{const v=parseFloat(e.target.value)||0;const nt={...wt,[key_]:v};saveWeekTargets(nt);saveGlobalTargets(nt);}}
+            style={{...inp,width:80,textAlign:"right"}}/>
+          <span style={{fontFamily:ff,fontSize:11,color:MU,minWidth:16}}>{unit}</span>
+        </div>
+      </div>
+    );
+  };
+
+  // All-weeks alert summary
+  const allAlerts=curWeeks.map((w,i)=>{
+    const t=w.weekTargets||globalTargets;
+    // Minimal calc — just check key metrics
+    const gross=n(w.revenue?.gross_sales);
+    const refunds=n(w.revenue?.refunds);
+    const disc=n(w.revenue?.discounts);
+    const effectiveBuckets=w.codeData?codeDataToDiscBuckets(w.codeData):(w.discBuckets||emptyDiscBuckets());
+    const dr=calcDiscReclassification(effectiveBuckets);
+    const truePromo=Math.max(0,dr.promoDisc||(disc-dr.serviceRecoveryRetail-dr.marketingDisc-dr.staffDisc));
+    const netRev=gross-refunds-truePromo+n(w.revenue?.shipping_income)-n(w.revenue?.paypal_fees);
+    if(netRev===0)return null;
+    const alerts=generateAlerts(w,netRev,dr,gross,t);
+    if(!alerts.length)return null;
+    return {weekLabel:w.label,dateRange:w.dateRange,alerts,netRev};
+  }).filter(Boolean);
+
+  return(
+    <div>
+      {/* Monthly Goal → Auto-calculate */}
+      <div style={{background:S,border:"1px solid "+A,borderRadius:radius+3,padding:"20px 24px",marginBottom:24}}>
+        <div style={{fontFamily:ff,fontSize:10,letterSpacing:2,color:A,textTransform:"uppercase",marginBottom:6}}>Monthly Sales Goal</div>
+        <div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:14,lineHeight:1.7}}>
+          Enter your monthly revenue target and click Auto-Calculate — all percentage and dollar targets will be derived from it instantly and saved to every week.
+        </div>
+        <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:180}}>
+            <Fld label={<span style={{fontFamily:ff,fontSize:10,color:MU,textTransform:"uppercase",letterSpacing:0.7}}>Monthly Revenue Target ($)</span>}>
+              <div style={{position:"relative"}}>
+                <span style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)",color:MU,fontFamily:ff,fontSize:13,pointerEvents:"none"}}>$</span>
+                <input type="number" value={monthlyGoal} onChange={e=>setMonthlyGoal(e.target.value)}
+                  style={{...inp,paddingLeft:22}} placeholder="e.g. 50000"/>
+              </div>
+            </Fld>
+          </div>
+          {weeklyGoal>0&&(
+            <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius,padding:"10px 14px",fontFamily:ff,fontSize:12,color:MU}}>
+              = <span style={{color:A,fontWeight:"bold"}}>${Math.round(weeklyGoal).toLocaleString()}</span>/week
+            </div>
+          )}
+          <button onClick={autoCalc} disabled={!weeklyGoal}
+            style={{padding:"9px 20px",background:weeklyGoal?A:"transparent",border:"1px solid "+(weeklyGoal?A:BR),color:weeklyGoal?"#ffffff":MU,fontFamily:ff,fontSize:11,cursor:weeklyGoal?"pointer":"not-allowed",borderRadius:radius,fontWeight:"bold",letterSpacing:1,textTransform:"uppercase"}}>
+            Auto-Calculate All Targets
+          </button>
+        </div>
+        {weeklyGoal>0&&wt.net_margin_target&&(
+          <div style={{marginTop:12,display:"flex",gap:16,flexWrap:"wrap"}}>
+            {[
+              ["Weekly profit target",`$${Math.round(weeklyGoal*wt.net_margin_target/100).toLocaleString()}`],
+              ["Max weekly COGS",`$${Math.round(weeklyGoal*wt.cogs_pct_target/100).toLocaleString()}`],
+              ["Max weekly OPEX",`$${Math.round(weeklyGoal*wt.opex_pct_target/100).toLocaleString()}`],
+              ["Max weekly wages",`$${Math.round(weeklyGoal*wt.wages_pct_target/100).toLocaleString()}`],
+            ].map(([l,v])=>(
+              <div key={l} style={{background:BG,border:"1px solid "+BR,borderRadius:radius,padding:"7px 12px"}}>
+                <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.6,marginBottom:2}}>{l}</div>
+                <div style={{fontFamily:ff,fontSize:13,color:GR,fontWeight:"bold"}}>{v}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginBottom:24}}>
+        {/* Targets editor */}
+        <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+3,padding:"20px 24px"}}>
+          <div style={{fontFamily:ff,fontSize:10,letterSpacing:2,color:A,textTransform:"uppercase",marginBottom:4}}>Target Values</div>
+          <div style={{fontFamily:ff,fontSize:10,color:MU,marginBottom:14}}>Changes apply to current week and save globally. Week-specific overrides marked in yellow.</div>
+          {renderTRow("Gross Margin Target","gross_margin_target","%","Industry benchmark: 50–65%")}
+          {renderTRow("Net Margin Target","net_margin_target","%","Healthy range: 12–20%")}
+          {renderTRow("Max COGS % of Revenue","cogs_pct_target","%","Keep under 35–45%")}
+          {renderTRow("Max OPEX % of Revenue","opex_pct_target","%","Target: ≤25%")}
+          {renderTRow("Max Wages % of Revenue","wages_pct_target","%","Target: ≤20%")}
+          {renderTRow("Max Promo Discount Rate","promo_disc_rate_max","%","% of gross sales — above this hurts margin")}
+          {renderTRow("Max Refund Rate","refund_rate_max","%","% of gross sales")}
+          {renderTRow("Service Recovery Alert (orders/wk)","service_recovery_max_orders","orders","Fires alert when exceeded")}
+          {renderTRow("Service Recovery Cost Alert ($/order)","service_recovery_cost_alert","$","Average cost before alert fires")}
+        </div>
+
+        {/* Live alert feed */}
+        <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+3,padding:"20px 24px"}}>
+          <div style={{fontFamily:ff,fontSize:10,letterSpacing:2,color:A,textTransform:"uppercase",marginBottom:4}}>This Month's Alerts</div>
+          <div style={{fontFamily:ff,fontSize:10,color:MU,marginBottom:14}}>Plain-English actions — what needs to happen this week.</div>
+          {allAlerts.length===0&&(
+            <div style={{textAlign:"center",padding:"40px 0",color:MU,fontFamily:ff,fontSize:12}}>
+              ✓ No alerts — all metrics within target, or no data entered yet.
+            </div>
+          )}
+          {allAlerts.map(({weekLabel,dateRange,alerts},wi)=>(
+            <div key={wi} style={{marginBottom:16}}>
+              <div style={{fontFamily:ff,fontSize:10,color:A,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>{weekLabel} — {dateRange}</div>
+              {alerts.map((a,ai)=>(
+                <AlertCard key={ai} alert={a}/>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Generate structured alerts from week data + targets
+function generateAlerts(week,netRev,dr,gross,targets){
+  const t=targets||DEFAULT_TARGETS;
+  const alerts=[];
+  const c_netProfit=n(week.cogs?.manufacturing_product)+n(week.cogs?.manufacturing_shipping); // simplified
+  const promoDisc=Math.max(0,dr.promoDisc||(n(week.revenue?.discounts)-dr.serviceRecoveryRetail-dr.marketingDisc-dr.staffDisc));
+  const refunds=n(week.revenue?.refunds);
+  const promoRate=gross>0?(promoDisc/gross)*100:0;
+  const refundRate=gross>0?(refunds/gross)*100:0;
+  const srOrders=dr.serviceRecoveryOrders||0;
+  const srCost=dr.serviceRecoveryCOGS||0;
+  const srCostPerOrder=srOrders>0?srCost/srOrders:0;
+  const weeklyRevenueTarget=t.weekly_revenue_target||0;
+
+  if(weeklyRevenueTarget>0&&gross<weeklyRevenueTarget){
+    const gap=weeklyRevenueTarget-gross;
+    alerts.push({sev:"alert",title:"Revenue below target",action:`You are ${fmtD(gap)} short of your weekly revenue goal. Review your marketing spend and conversion — are ads running? Any pending campaigns to push?`,metric:`${fmtD(gross)} of ${fmtD(weeklyRevenueTarget)} target`});
+  }
+  if(promoRate>t.promo_disc_rate_max){
+    const excess=promoDisc-gross*(t.promo_disc_rate_max/100);
+    alerts.push({sev:"alert",title:"Discounting too aggressively",action:`Your promo discount rate is ${promoRate.toFixed(1)}% of gross sales — ${(promoRate-t.promo_disc_rate_max).toFixed(1)}% over the ${t.promo_disc_rate_max}% limit. You gave away an extra ${fmtD(excess)} that came straight off your margin. Reduce sale frequency or cut discount depth by 5%.`,metric:`${promoRate.toFixed(1)}% vs ${t.promo_disc_rate_max}% target`});
+  }
+  if(refundRate>t.refund_rate_max){
+    const excess=refunds-gross*(t.refund_rate_max/100);
+    alerts.push({sev:"warn",title:"Refund rate elevated",action:`Refunds are ${refundRate.toFixed(1)}% of sales — ${fmtD(excess)} above normal. Check for product issues, sizing complaints, or delayed orders causing refund requests.`,metric:`${refundRate.toFixed(1)}% vs ${t.refund_rate_max}% target`});
+  }
+  if(srOrders>0&&srOrders>=t.service_recovery_max_orders){
+    alerts.push({sev:"warn",title:"Too many service recovery orders",action:`${srOrders} orders required service recovery this week (threshold: ${t.service_recovery_max_orders}). Check which codes are firing most — RESHIP-FAULTY or CS-ERROR suggest a packing/QC issue that ops should review immediately.`,metric:`${srOrders} orders`});
+  }
+  if(srCostPerOrder>0&&srCostPerOrder>=t.service_recovery_cost_alert){
+    alerts.push({sev:"warn",title:"Service recovery cost per order is high",action:`Each service recovery order is costing you ${fmtD(srCostPerOrder)} on average. At this rate you'd spend ${fmtD(srCostPerOrder*52)} per year on errors. Identify the most frequent failure mode and fix the root cause.`,metric:`${fmtD(srCostPerOrder)}/order vs ${fmtD(t.service_recovery_cost_alert)} threshold`});
+  }
+  return alerts;
+}
+
+function AlertCard({alert}){
+  const {S2,BR,RD,YL,GR,ff,radius}=useTheme();
+  const col=alert.sev==="alert"?RD:YL;
+  return(
+    <div style={{background:col+"0f",border:"1px solid "+col+"44",borderRadius:radius+1,padding:"12px 14px",marginBottom:8}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+        <span style={{fontFamily:ff,fontSize:12,color:col,fontWeight:"bold"}}>{alert.title}</span>
+        <span style={{fontFamily:ff,fontSize:10,color:col+"99",marginLeft:"auto",whiteSpace:"nowrap"}}>{alert.metric}</span>
+      </div>
+      <div style={{fontFamily:ff,fontSize:11,color:col==="#ff6b6b"?"#ffb3b3":"#ffe8a0",lineHeight:1.65}}>{alert.action}</div>
+    </div>
+  );
+}
+
 // ─── Password Screen ──────────────────────────────────────────────────────────
 function PasswordScreen({onAuth,labels}){
   const {BG,BR,TX,A,MU,RD,ff}=useTheme();
@@ -1521,7 +2499,7 @@ function PasswordScreen({onAuth,labels}){
           style={{width:"100%",boxSizing:"border-box",background:"transparent",border:"1px solid "+(err?RD:BR),color:TX,padding:"14px 16px",fontFamily:ff,fontSize:13,outline:"none",borderRadius:2,letterSpacing:4,textAlign:"center",marginBottom:10,transition:"border-color 0.2s"}}/>
         {err&&<div style={{color:RD,fontSize:10,textAlign:"center",letterSpacing:2,textTransform:"uppercase",marginBottom:8}}>Incorrect Password</div>}
         <button onClick={check} style={{width:"100%",padding:"13px 0",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:2,letterSpacing:5,textTransform:"uppercase"}}
-          onMouseEnter={e=>{e.target.style.background=A;e.target.style.color="#000";}} onMouseLeave={e=>{e.target.style.background="transparent";e.target.style.color=A;}}>
+          onMouseEnter={e=>{e.target.style.background=A;e.target.style.color="#ffffff";}} onMouseLeave={e=>{e.target.style.background="transparent";e.target.style.color=A;}}>
           Enter
         </button>
       </div>
@@ -1530,18 +2508,18 @@ function PasswordScreen({onAuth,labels}){
 }
 
 // ─── Cog Settings Modal ───────────────────────────────────────────────────────
-function CogSettings({settings,onSettingsChange,theme,onThemeChange,onClose}){
+function CogSettings({settings,onSettingsChange,theme,onThemeChange,onClose,labels,onLabelsSave}){
   const {BG,S,S2,BR,A,MU,TX,ff,radius}=useTheme();
   return(
     <div style={{position:"fixed",inset:0,zIndex:1000,display:"flex",alignItems:"flex-start",justifyContent:"flex-end"}}>
       <div onClick={onClose} style={{position:"absolute",inset:0,background:"#000000aa"}}/>
-      <div style={{position:"relative",zIndex:1,background:S,border:"1px solid "+BR,borderRadius:radius+4,margin:"20px 20px 20px 0",width:560,maxWidth:"calc(100vw - 40px)",maxHeight:"calc(100vh - 40px)",overflowY:"auto",boxShadow:"0 20px 60px #00000099"}}>
+      <div style={{position:"relative",zIndex:1,background:S,border:"1px solid "+BR,borderRadius:radius+4,margin:"20px 20px 20px 0",width:580,maxWidth:"calc(100vw - 40px)",maxHeight:"calc(100vh - 40px)",overflowY:"auto",boxShadow:"0 20px 60px #00000099"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"18px 24px",borderBottom:"1px solid "+BR}}>
           <span style={{fontFamily:ff,fontSize:12,color:A,letterSpacing:2,textTransform:"uppercase"}}>Settings</span>
           <button onClick={onClose} style={{background:"transparent",border:"none",color:MU,fontSize:20,cursor:"pointer",lineHeight:1}}>x</button>
         </div>
         <div style={{padding:"20px 24px"}}>
-          <SettingsPage settings={settings} onSettingsChange={onSettingsChange} theme={theme} onThemeChange={onThemeChange}/>
+          <SettingsPage settings={settings} onSettingsChange={onSettingsChange} theme={theme} onThemeChange={onThemeChange} labels={labels} onLabelsSave={onLabelsSave}/>
         </div>
       </div>
     </div>
@@ -1582,16 +2560,32 @@ export default function App(){
   const [settings,setSettings]=useState(null);
   const [activeWeek,setActiveWeek]=useState(0);
 
-  const opexKeys=settings?.opexKeys||DEFAULT_OPEX_KEYS;
-  const wageDepts=settings?.wageDepts||DEFAULT_WAGE_DEPTS;
+  // Merge DEFAULT_OPEX_KEYS metadata (computed/sub/parent) into stored keys so
+  // new structural properties survive even if settings were saved before they existed
+  const opexKeys=(settings?.opexKeys||DEFAULT_OPEX_KEYS).map(k=>{
+    const def=DEFAULT_OPEX_KEYS.find(d=>d.key===k.key)||{};
+    return {...def,...k}; // def first so stored label/group overrides default, but def adds computed/sub/parent
+  });
+  // Also ensure sub-keys from DEFAULT are present (user may have saved before sub-keys were added)
+  const storedKeys=opexKeys.map(k=>k.key);
+  DEFAULT_OPEX_KEYS.forEach(dk=>{if(!storedKeys.includes(dk.key))opexKeys.push(dk);});
+  // Merge DEFAULT_WAGE_DEPTS so new depts (e.g. Superannuation) always appear
+  const storedDepts=settings?.wageDepts||DEFAULT_WAGE_DEPTS;
+  const wageDepts=DEFAULT_WAGE_DEPTS.map(def=>{
+    const stored=storedDepts.find(d=>d.key===def.key);
+    if(!stored)return def;
+    const storedSubs=stored.subs||[];
+    const storedSubKeys=storedSubs.map(s=>s.key);
+    const newSubs=def.subs.filter(s=>!storedSubKeys.includes(s.key));
+    return {...stored,subs:[...storedSubs,...newSubs]};
+  });
   const staff=settings?.staff||DEFAULT_STAFF;
   const theme=buildTheme(themeRaw);
 
   // Labels with save callback - saves into settings.labels so it persists
-  const labels={...DEFAULT_LABELS,...labelsRaw,_save:(key,val)=>{
+  const labels={...DEFAULT_LABELS,...labelsRaw,_targets:{...DEFAULT_TARGETS,...(labelsRaw._targets||{})},_save:(key,val)=>{
     const nl={...labelsRaw,[key]:val};
     setLabelsRaw(nl);
-    // immediately save to prevent loss
     const ns={...(settings||{}),labels:nl};
     setSettings(ns);
     saveAll(monthData,fixed,ns);
@@ -1659,11 +2653,12 @@ export default function App(){
     </ThemeContext.Provider>
   );
 
-  const {A,BG,S,S2,BR,TX,MU,ff,ffTitle,radius,GR,RD}=theme;
+  const {A,BG,S,S2,BR,TX,MU,ff,ffTitle,radius,GR,RD,szHeaderTitle,szHeaderBrand}=theme;
 
   const TABS=[
     {id:"input",key:"tab_input"},{id:"overview",key:"tab_overview"},{id:"visualise",key:"tab_visualise"},
     {id:"compare",key:"tab_compare"},{id:"fixed",key:"tab_fixed"},
+    {id:"targets",key:"tab_targets"},
     {id:"reports",key:"tab_reports",suffix:" ("+Object.keys(monthData).length+")"},
   ];
 
@@ -1675,11 +2670,11 @@ export default function App(){
           <div style={{maxWidth:1200,margin:"0 auto",padding:"20px 0 0"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",flexWrap:"wrap",gap:12}}>
               <div>
-                <div style={{color:A,fontSize:9,letterSpacing:4,textTransform:"uppercase",marginBottom:4}}>
-                  <E value={labels.header_brand} onSave={v=>labels._save("header_brand",v)} style={{color:A,fontFamily:ffTitle,fontSize:9}}/>
+                <div style={{color:A,fontSize:szHeaderBrand,letterSpacing:4,textTransform:"uppercase",marginBottom:4}}>
+                  <E value={labels.header_brand} onSave={v=>labels._save("header_brand",v)} style={{color:A,fontFamily:ffTitle,fontSize:szHeaderBrand}}/>
                 </div>
-                <h1 style={{margin:0,fontSize:22,fontWeight:"normal",letterSpacing:2,color:TX,textTransform:"uppercase",fontFamily:ffTitle}}>
-                  <E value={labels.header_title} onSave={v=>labels._save("header_title",v)} style={{color:TX,fontFamily:ffTitle,fontSize:22}}/>
+                <h1 style={{margin:0,fontSize:szHeaderTitle,fontWeight:"normal",letterSpacing:2,color:TX,textTransform:"uppercase",fontFamily:ffTitle}}>
+                  <E value={labels.header_title} onSave={v=>labels._save("header_title",v)} style={{color:TX,fontFamily:ffTitle,fontSize:szHeaderTitle}}/>
                 </h1>
               </div>
               <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
@@ -1722,8 +2717,8 @@ export default function App(){
                   <E value={selMonth?.label+" — "+(labels.header_subtitle||"weeks auto-dated Mon-Sun")} onSave={v=>labels._save("header_subtitle",v.includes("—")?v.split("—").slice(1).join("—").trim():v)} style={{fontFamily:ff,fontSize:11,color:MU}}/>
                 </div>
                 <button onClick={()=>handleExport()}
-                  style={{padding:"9px 16px",background:copied?A:"transparent",border:"1px solid "+A,color:copied?"#000":A,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
-                  <E value={labels.btn_generate_export} onSave={v=>labels._save("btn_generate_export",v)} style={{fontFamily:ff,fontSize:11,color:copied?"#000":A}}/>{copied?" ✓":""}
+                  style={{padding:"9px 16px",background:copied?A:"transparent",border:"1px solid "+A,color:copied?"#ffffff":A,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
+                  <E value={labels.btn_generate_export} onSave={v=>labels._save("btn_generate_export",v)} style={{fontFamily:ff,fontSize:11,color:copied?"#ffffff":A}}/>{copied?" ✓":""}
                 </button>
               </div>
 
@@ -1761,7 +2756,7 @@ export default function App(){
 
           {tab==="overview"&&!loading&&(
             <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+4,padding:"24px 28px"}}>
-              <MonthlyOverview weeks={curWeeks} fixed={fixed} extras={curExtras} onExtrasChange={updateExtras} onExport={()=>handleExport()} copied={copied} opexKeys={opexKeys} depts={wageDepts} labels={labels}/>
+              <MonthlyOverview weeks={curWeeks} fixed={fixed} extras={curExtras} onExtrasChange={updateExtras} onExport={()=>handleExport()} copied={copied} opexKeys={opexKeys} depts={wageDepts} labels={labels} monthKey={curKey}/>
             </div>
           )}
 
@@ -1783,6 +2778,19 @@ export default function App(){
             </div>
           )}
 
+          {tab==="targets"&&!loading&&(
+            <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+4,padding:"24px 28px"}}>
+              <TargetsPage
+                curWeeks={curWeeks}
+                onUpdateWeeks={updateWeeks}
+                activeWeek={activeWeek}
+                labels={labels}
+                monthData={monthData}
+                selMonthKey={curKey}
+              />
+            </div>
+          )}
+
           {tab==="reports"&&!loading&&(
             <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+4,padding:"24px 28px"}}>
               <ReportsPage monthData={monthData} fixed={fixed} onSave={handleSaveMonthData} onExport={handleExport} opexKeys={opexKeys} depts={wageDepts}/>
@@ -1799,6 +2807,8 @@ export default function App(){
               theme={themeRaw}
               onThemeChange={updateTheme}
               onClose={()=>setShowSettings(false)}
+              labels={labels}
+              onLabelsSave={(key,val)=>labels._save(key,val)}
             />
           </ThemeContext.Provider>
         )}
