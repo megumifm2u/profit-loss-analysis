@@ -708,34 +708,34 @@ function parseProductMargin(raw){
   const pn=s=>{
     if(!s)return 0;
     const clean=s.toString().trim().replace(/[$,]/g,"").replace(/%/g,"");
-    return parseFloat(clean)||0;
+    const v=parseFloat(clean);
+    return isNaN(v)?0:v;
   };
   const rows=[];
   for(const line of raw.split("\n")){
     const parts=line.split("\t");
     if(parts.length<8)continue;
-    // Skip header lines
-    if(/product|variant|units sold/i.test(parts[0]))continue;
-    // Need at least product name and some numeric data
+    if(/^(product|variant|units sold)/i.test(parts[0].trim()))continue;
+    const product=parts[0].trim();
+    if(!product)continue;
+    const variant=parts[1]?.trim()||"";
     const units=pn(parts[2]);
     const gross=pn(parts[3]);
-    if(!parts[0].trim()||(!units&&!gross))continue;
-    const product=parts[0].trim();
-    const variant=parts[1]?.trim()||"";
+    if(!units&&!gross)continue;
     const discounts=Math.abs(pn(parts[4]));
     const returns=Math.abs(pn(parts[5]));
     const netSales=pn(parts[6]);
     const cogsUnit=pn(parts[7]);
     const totalCogs=pn(parts[8])||cogsUnit*units;
     const grossProfit=pn(parts[9])||netSales-totalCogs;
-    const marginPct=netSales>0?(grossProfit/netSales)*100:0;
     const discRate=gross>0?(discounts/gross)*100:0;
+    const marginPct=netSales>0?(grossProfit/netSales)*100:0;
     rows.push({product,variant,units,gross,discounts,returns,netSales,cogsUnit,totalCogs,grossProfit,marginPct,discRate});
   }
   // Aggregate by product
   const map={};
   rows.forEach(r=>{
-    if(!map[r.product])map[r.product]={product:r.product,units:0,gross:0,discounts:0,returns:0,netSales:0,totalCogs:0,grossProfit:0,variants:[]};
+    if(!map[r.product])map[r.product]={product:r.product,units:0,gross:0,discounts:0,returns:0,netSales:0,totalCogs:0,grossProfit:0,avgCogsUnit:0,variants:[]};
     const p=map[r.product];
     p.units+=r.units; p.gross+=r.gross; p.discounts+=r.discounts;
     p.returns+=r.returns; p.netSales+=r.netSales; p.totalCogs+=r.totalCogs;
@@ -743,6 +743,7 @@ function parseProductMargin(raw){
   });
   return Object.values(map).map(p=>({
     ...p,
+    avgCogsUnit:p.units>0?p.totalCogs/p.units:0,
     marginPct:p.netSales>0?(p.grossProfit/p.netSales)*100:0,
     discRate:p.gross>0?(p.discounts/p.gross)*100:0,
   })).sort((a,b)=>b.netSales-a.netSales);
@@ -1078,160 +1079,271 @@ function ShopifyImport({week,onChange,labels}){
 }
 
 // ─── Product Margin Import ────────────────────────────────────────────────────
-function ProductMarginImport({products,onUpdate,targetMargin,fullPage}){
+function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targetMargin,fullPage}){
   const {S2,BR,A,S,TX,ff,MU,GR,RD,radius}=useTheme();
   const [raw,setRaw]=useState("");
   const [msg,setMsg]=useState("");
   const [open,setOpen]=useState(!!fullPage);
-  const [showPaste,setShowPaste]=useState(!products?.length);
+  const [showPaste,setShowPaste]=useState(false);
   const [expandedProduct,setExpandedProduct]=useState(null);
+  const [editCat,setEditCat]=useState(null); // product key being edited in catalogue
   const target=targetMargin||55;
   const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const pct=v=>v.toFixed(1)+"%";
 
-  function apply(){
+  const list=products||[];
+  const cat=catalogue||{};
+
+  function applyPaste(){
     const parsed=parseProductMargin(raw);
-    if(!parsed.length){setMsg("No data detected");return;}
-    // Merge with existing — update matching products, add new ones
+    if(!parsed.length){setMsg("No data detected — check format");return;}
+    // Merge with existing products
     const existing={};
-    (products||[]).forEach(p=>{existing[p.product]=p;});
+    list.forEach(p=>{existing[p.product]=p;});
     parsed.forEach(p=>{existing[p.product]=p;});
     onUpdate(Object.values(existing));
-    setMsg("Saved "+parsed.length+" products");
-    setRaw("");
-    setShowPaste(false);
+    setRaw(""); setShowPaste(false);
+    setMsg("Loaded "+parsed.length+" products");
     setTimeout(()=>setMsg(""),3000);
   }
 
-  const list=products||[];
+  // Per-product catalogue entry helper
+  const catEntry=name=>cat[name]||{pickPack:0,packagingType:"satchel",tariffPct:0,targetMarginPct:target,shippingAU:8,shippingUS:18,shippingIntl:22};
+  const saveCat=(name,field,val)=>{
+    const updated={...cat,[name]:{...catEntry(name),[field]:val}};
+    onCatalogueUpdate(updated);
+  };
+
+  // Auto-calculations per product
+  const calcProduct=(p)=>{
+    const c=catEntry(p.product);
+    const avgRetail=p.units>0?p.gross/p.units:0;
+    const cogsUnit=p.avgCogsUnit||0;
+    // Weighted avg shipping (assume mostly AU for now — user can refine in catalogue)
+    const avgShipping=(c.shippingAU*0.7+c.shippingUS*0.2+c.shippingIntl*0.1);
+    const varCostUnit=cogsUnit+c.pickPack+avgShipping+(cogsUnit*(c.tariffPct/100));
+    const contributionMargin=avgRetail>0?((avgRetail-varCostUnit)/avgRetail)*100:0;
+    const breakEven=varCostUnit>0?varCostUnit/(1-(c.targetMarginPct/100)):0;
+    const discountLevels=[10,15,20,25,30].map(d=>{
+      const discPrice=avgRetail*(1-d/100);
+      const margin=discPrice>0?((discPrice-varCostUnit)/discPrice)*100:0;
+      return{disc:d,price:discPrice,margin,viable:margin>=c.targetMarginPct};
+    });
+    const modelledMargin=avgRetail>0?((avgRetail-varCostUnit)/avgRetail)*100:0;
+    const actualMargin=p.marginPct;
+    const variance=actualMargin-modelledMargin;
+    return{cogsUnit,varCostUnit,avgRetail,contributionMargin,breakEven,discountLevels,modelledMargin,actualMargin,variance,c};
+  };
+
+  // Summary
   const totalNet=list.reduce((s,p)=>s+p.netSales,0);
   const totalGP=list.reduce((s,p)=>s+p.grossProfit,0);
   const blended=totalNet>0?(totalGP/totalNet)*100:0;
-  const flags=list.filter(p=>p.netSales>0&&p.marginPct<target);
+  const belowTarget=list.filter(p=>p.netSales>0&&p.marginPct<target);
   const zeroed=list.filter(p=>p.netSales<=0&&p.gross>0);
+  const flagCount=belowTarget.length+zeroed.length;
 
-  const statusColor=p=>{
-    if(p.netSales<=0&&p.gross>0)return RD;
-    if(p.marginPct<target)return "#f59e0b";
-    return GR;
-  };
-  const statusLabel=p=>{
-    if(p.netSales<=0&&p.gross>0)return"GIFTED";
-    if(p.marginPct<target)return"LOW";
-    return"OK";
-  };
+  const inp={background:S,border:"1px solid "+BR,color:TX,padding:"5px 8px",fontFamily:ff,fontSize:11,outline:"none",borderRadius:radius,width:"100%",boxSizing:"border-box"};
 
   return(
     <div style={{marginBottom:16}}>
-      {/* Header toggle */}
-      <div onClick={()=>!fullPage&&setOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 14px",background:S2,border:"1px solid "+(open?A:BR),borderRadius:open?"6px 6px 0 0":"6px",cursor:fullPage?"default":"pointer",userSelect:"none"}}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
+      {/* Collapsible header (only when not fullPage) */}
+      {!fullPage&&(
+        <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 14px",background:S2,border:"1px solid "+(open?A:BR),borderRadius:open?"6px 6px 0 0":"6px",cursor:"pointer",userSelect:"none"}}>
           <span style={{fontFamily:ff,fontSize:10,color:open?A:MU,letterSpacing:2,textTransform:"uppercase"}}>Product Margin</span>
-          {list.length>0&&!open&&(
-            <span style={{fontFamily:ff,fontSize:10,color:MU}}>
-              {list.length} products · {blended.toFixed(1)}% blended
-              {(flags.length+zeroed.length)>0&&<span style={{color:RD,marginLeft:6}}>· {flags.length+zeroed.length} flagged</span>}
-            </span>
-          )}
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            {list.length>0&&<span style={{fontFamily:ff,fontSize:10,color:MU}}>{list.length} products · <span style={{color:blended>=target?GR:RD,fontWeight:"bold"}}>{blended.toFixed(1)}%</span> blended{flagCount>0&&<span style={{color:RD}}> · {flagCount} flagged</span>}</span>}
+            <span style={{fontFamily:ff,fontSize:10,color:MU}}>{open?"▲":"▼"}</span>
+          </div>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          {list.length>0&&<span style={{fontFamily:ff,fontSize:9,color:blended>=target?GR:RD,fontWeight:"bold"}}>{blended.toFixed(1)}%</span>}
-          {!fullPage&&<span style={{fontFamily:ff,fontSize:10,color:MU}}>{open?"▲":"▼"}</span>}
-        </div>
-      </div>
+      )}
 
-      {open&&(
-        <div style={{border:"1px solid "+BR,borderTop:"none",borderRadius:"0 0 6px 6px",background:S2}}>
-          {/* Summary bar */}
-          {list.length>0&&(
-            <div style={{display:"flex",gap:0,borderBottom:"1px solid "+BR+"44"}}>
-              {[
-                ["Blended GM",blended.toFixed(1)+"%",blended>=target?GR:RD],
-                ["Net Sales",fmt(totalNet),A],
-                ["Gross Profit",fmt(totalGP),totalGP>=0?GR:RD],
-                ["Flagged",(flags.length+zeroed.length).toString(),(flags.length+zeroed.length)>0?RD:GR],
-              ].map(([lbl,val,col],i)=>(
-                <div key={i} style={{flex:1,padding:"8px 12px",borderRight:i<3?"1px solid "+BR+"44":"none"}}>
-                  <div style={{fontFamily:ff,fontSize:8,color:MU,textTransform:"uppercase",letterSpacing:0.7}}>{lbl}</div>
-                  <div style={{fontFamily:ff,fontSize:13,color:col,fontWeight:"bold",marginTop:2}}>{val}</div>
+      {(open||fullPage)&&(
+        <div style={{border:fullPage?"none":"1px solid "+BR,borderTop:"none",borderRadius:fullPage?0:"0 0 6px 6px",background:fullPage?"transparent":S2}}>
+
+          {/* ── SECTION 1: Paste from Shopify ── */}
+          <div style={{padding:fullPage?"0 0 20px":"14px 16px 0",borderBottom:"1px solid "+BR+"44",marginBottom:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase"}}>1 — Shopify Data</div>
+              <button onClick={()=>setShowPaste(s=>!s)}
+                style={{padding:"4px 12px",background:showPaste?A:"transparent",border:"1px solid "+(showPaste?A:BR),color:showPaste?"#fff":MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
+                {list.length?"Update":"Paste Data"}
+              </button>
+            </div>
+
+            {showPaste&&(
+              <div style={{marginBottom:12}}>
+                <div style={{fontFamily:ff,fontSize:9,color:MU,marginBottom:5}}>
+                  Paste output from: <em>Pull a complete product margin report... Export as table using GraphQL</em>
                 </div>
-              ))}
-            </div>
-          )}
+                <textarea value={raw} onChange={e=>setRaw(e.target.value)}
+                  placeholder={"Product	Variant	Units Sold	Gross Sales	Discounts	Returns	Net Sales	COGS/Unit	Total COGS	Gross Profit	Margin %"}
+                  rows={5}
+                  style={{...inp,fontFamily:"monospace",fontSize:11,resize:"vertical"}}/>
+                <div style={{display:"flex",gap:8,marginTop:6,alignItems:"center"}}>
+                  <button onClick={applyPaste} style={{padding:"6px 16px",background:A,border:"none",color:"#fff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>LOAD</button>
+                  <button onClick={()=>{setShowPaste(false);setRaw("");}} style={{padding:"6px 12px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius}}>Cancel</button>
+                  {msg&&<span style={{fontFamily:ff,fontSize:11,color:msg.includes("No")?RD:GR}}>{msg}</span>}
+                </div>
+              </div>
+            )}
 
-          {/* Product rows */}
-          {list.length>0&&(
-            <div style={{maxHeight:320,overflowY:"auto"}}>
-              {list.map((p,i)=>{
-                const isExp=expandedProduct===p.product;
-                const sc=statusColor(p);
-                return(
-                  <div key={i} style={{borderBottom:"1px solid "+BR+"33"}}>
-                    <div onClick={()=>setExpandedProduct(isExp?null:p.product)}
-                      style={{display:"flex",alignItems:"center",gap:8,padding:"7px 14px",cursor:p.variants?.length>1?"pointer":"default",background:isExp?A+"11":"transparent"}}>
-                      <span style={{fontFamily:ff,fontSize:9,color:sc,fontWeight:"bold",minWidth:36,letterSpacing:0.5}}>{statusLabel(p)}</span>
-                      <span style={{fontFamily:ff,fontSize:11,color:TX,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.product}</span>
-                      <span style={{fontFamily:ff,fontSize:10,color:MU,minWidth:28,textAlign:"right"}}>{p.units}u</span>
-                      <span style={{fontFamily:ff,fontSize:10,color:p.discRate>20?RD:MU,minWidth:40,textAlign:"right"}}>{p.discRate.toFixed(1)}%</span>
-                      <span style={{fontFamily:ff,fontSize:10,color:A,minWidth:64,textAlign:"right"}}>{fmt(p.netSales)}</span>
-                      <span style={{fontFamily:ff,fontSize:11,color:sc,fontWeight:"bold",minWidth:44,textAlign:"right"}}>{p.marginPct.toFixed(1)}%</span>
-                      {p.variants?.length>1&&<span style={{fontFamily:ff,fontSize:9,color:MU}}>{isExp?"▲":"▼"}</span>}
-                    </div>
-                    {isExp&&p.variants?.length>1&&(
-                      <div style={{background:S,padding:"6px 14px 8px 50px"}}>
-                        <div style={{display:"flex",gap:6,fontFamily:ff,fontSize:8,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:4,paddingBottom:3,borderBottom:"1px solid "+BR+"33"}}>
-                          <span style={{minWidth:40}}>Variant</span><span style={{minWidth:28}}>Units</span><span style={{minWidth:40}}>Disc%</span><span style={{minWidth:64}}>Net</span><span style={{minWidth:44}}>Margin</span>
-                        </div>
-                        {p.variants.map((v,j)=>(
-                          <div key={j} style={{display:"flex",gap:6,fontFamily:ff,fontSize:10,color:MU,padding:"3px 0"}}>
-                            <span style={{minWidth:40,color:TX}}>{v.variant}</span>
-                            <span style={{minWidth:28}}>{v.units}u</span>
-                            <span style={{minWidth:40,color:v.discRate>20?RD:MU}}>{v.discRate.toFixed(1)}%</span>
-                            <span style={{minWidth:64,color:A}}>{fmt(v.netSales)}</span>
-                            <span style={{minWidth:44,color:v.marginPct<target?RD:GR,fontWeight:"bold"}}>{v.marginPct.toFixed(1)}%</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+            {/* Shopify data summary */}
+            {list.length>0&&!showPaste&&(
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {[["Products",list.length,MU],["Net Sales",fmt(totalNet),A],["Blended GM",blended.toFixed(1)+"%",blended>=target?GR:RD],["Flagged",flagCount,flagCount>0?RD:GR]].map(([l,v,c])=>(
+                  <div key={l} style={{flex:1,minWidth:80,background:S,borderRadius:radius,padding:"6px 10px"}}>
+                    <div style={{fontFamily:ff,fontSize:8,color:MU,textTransform:"uppercase",letterSpacing:0.7}}>{l}</div>
+                    <div style={{fontFamily:ff,fontSize:13,color:c,fontWeight:"bold"}}>{v}</div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Actions row */}
-          <div style={{padding:"10px 14px",display:"flex",alignItems:"center",gap:10,borderTop:list.length?"1px solid "+BR+"44":"none",flexWrap:"wrap"}}>
-            <button onClick={()=>setShowPaste(s=>!s)}
-              style={{padding:"6px 14px",background:showPaste?A:"transparent",border:"1px solid "+(showPaste?A:BR),color:showPaste?"#fff":MU,fontFamily:ff,fontSize:10,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
-              {list.length>0?"Update Data":"+ Add Data"}
-            </button>
-            {list.length>0&&<button onClick={()=>{if(window.confirm("Clear all product margin data?"))onUpdate([]);}}
-              style={{padding:"6px 14px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:10,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
-              Clear
-            </button>}
-            {msg&&<span style={{fontFamily:ff,fontSize:11,color:GR}}>{msg}</span>}
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* Paste area — shown only when editing */}
-          {showPaste&&(
-            <div style={{padding:"0 14px 14px"}}>
-              <div style={{fontFamily:ff,fontSize:9,color:MU,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>
-                Paste Shopify AI product margin table — new data merges with existing
-              </div>
-              <textarea value={raw} onChange={e=>setRaw(e.target.value)}
-                placeholder={"Product	Variant	Units Sold	Gross Sales	Discounts	Returns	Net Sales	COGS/Unit	Total COGS	Gross Profit	Margin %"}
-                rows={5}
-                style={{width:"100%",boxSizing:"border-box",background:S,border:"1px solid "+BR,color:TX,padding:"10px 12px",fontFamily:"monospace",fontSize:11,outline:"none",borderRadius:radius,resize:"vertical"}}/>
-              <div style={{display:"flex",gap:10,marginTop:8}}>
-                <button onClick={apply} style={{padding:"7px 16px",background:A,border:"none",color:"#fff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
-                  SAVE
-                </button>
-                <button onClick={()=>{setShowPaste(false);setRaw("");}}
-                  style={{padding:"7px 14px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
-                  Cancel
-                </button>
+          {/* ── SECTION 2: Product Catalogue (manual once) ── */}
+          {list.length>0&&(
+            <div style={{padding:fullPage?"0 0 20px":"0 16px 0",borderBottom:"1px solid "+BR+"44",marginBottom:16}}>
+              <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase",marginBottom:8}}>2 — Product Catalogue <span style={{color:MU,fontSize:9,fontWeight:"normal",letterSpacing:0}}>set once, auto-applies</span></div>
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontFamily:ff,fontSize:11}}>
+                  <thead>
+                    <tr style={{borderBottom:"1px solid "+BR}}>
+                      {["Product","Pick & Pack","Packaging","Tariff %","Target GM%","Ship AU","Ship US","Ship Intl"].map(h=>(
+                        <th key={h} style={{padding:"5px 8px",color:MU,fontWeight:"normal",fontSize:8,letterSpacing:0.7,textTransform:"uppercase",textAlign:h==="Product"?"left":"center",whiteSpace:"nowrap"}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {list.map((p,i)=>{
+                      const c=catEntry(p.product);
+                      const isEdit=editCat===p.product;
+                      return(
+                        <tr key={i} style={{borderBottom:"1px solid "+BR+"22",background:isEdit?A+"11":"transparent"}} onClick={()=>setEditCat(isEdit?null:p.product)}>
+                          <td style={{padding:"6px 8px",color:TX,cursor:"pointer",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.product}</td>
+                          {isEdit?(
+                            <>
+                              <td style={{padding:"4px 6px"}}><input type="number" value={c.pickPack} onChange={e=>saveCat(p.product,"pickPack",parseFloat(e.target.value)||0)} style={{...inp,width:60}} onClick={e=>e.stopPropagation()}/></td>
+                              <td style={{padding:"4px 6px"}}>
+                                <select value={c.packagingType} onChange={e=>saveCat(p.product,"packagingType",e.target.value)} style={{...inp,width:80}} onClick={e=>e.stopPropagation()}>
+                                  <option value="satchel">Satchel</option>
+                                  <option value="giftbox">Gift Box</option>
+                                  <option value="poly">Polybag</option>
+                                </select>
+                              </td>
+                              <td style={{padding:"4px 6px"}}><input type="number" value={c.tariffPct} onChange={e=>saveCat(p.product,"tariffPct",parseFloat(e.target.value)||0)} style={{...inp,width:56}} onClick={e=>e.stopPropagation()}/></td>
+                              <td style={{padding:"4px 6px"}}><input type="number" value={c.targetMarginPct} onChange={e=>saveCat(p.product,"targetMarginPct",parseFloat(e.target.value)||0)} style={{...inp,width:56}} onClick={e=>e.stopPropagation()}/></td>
+                              <td style={{padding:"4px 6px"}}><input type="number" value={c.shippingAU} onChange={e=>saveCat(p.product,"shippingAU",parseFloat(e.target.value)||0)} style={{...inp,width:56}} onClick={e=>e.stopPropagation()}/></td>
+                              <td style={{padding:"4px 6px"}}><input type="number" value={c.shippingUS} onChange={e=>saveCat(p.product,"shippingUS",parseFloat(e.target.value)||0)} style={{...inp,width:56}} onClick={e=>e.stopPropagation()}/></td>
+                              <td style={{padding:"4px 6px"}}><input type="number" value={c.shippingIntl} onChange={e=>saveCat(p.product,"shippingIntl",parseFloat(e.target.value)||0)} style={{...inp,width:56}} onClick={e=>e.stopPropagation()}/></td>
+                            </>
+                          ):(
+                            <>
+                              <td style={{padding:"6px 8px",color:MU,textAlign:"center"}}>{c.pickPack>0?fmt(c.pickPack):<span style={{color:BR}}>—</span>}</td>
+                              <td style={{padding:"6px 8px",color:MU,textAlign:"center",fontSize:10}}>{c.packagingType}</td>
+                              <td style={{padding:"6px 8px",color:MU,textAlign:"center"}}>{c.tariffPct>0?c.tariffPct+"%":<span style={{color:BR}}>—</span>}</td>
+                              <td style={{padding:"6px 8px",color:MU,textAlign:"center"}}>{c.targetMarginPct}%</td>
+                              <td style={{padding:"6px 8px",color:MU,textAlign:"center"}}>{fmt(c.shippingAU)}</td>
+                              <td style={{padding:"6px 8px",color:MU,textAlign:"center"}}>{fmt(c.shippingUS)}</td>
+                              <td style={{padding:"6px 8px",color:MU,textAlign:"center"}}>{fmt(c.shippingIntl)}</td>
+                            </>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div style={{fontFamily:ff,fontSize:9,color:MU,marginTop:6}}>Click any row to edit its catalogue values</div>
               </div>
             </div>
           )}
+
+          {/* ── SECTION 3: Auto-Calculated Results ── */}
+          {list.length>0&&(
+            <div style={{padding:fullPage?"0":"0 16px 14px"}}>
+              <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase",marginBottom:10}}>3 — Auto-Calculated</div>
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontFamily:ff,fontSize:11}}>
+                  <thead>
+                    <tr style={{borderBottom:"1px solid "+BR}}>
+                      {["Product","Avg Retail","Var Cost","Contrib GM","Break-even","Actual GM","Modelled GM","Variance","10% disc","15% disc","20% disc","25% disc"].map(h=>(
+                        <th key={h} style={{padding:"5px 8px",color:MU,fontWeight:"normal",fontSize:8,letterSpacing:0.7,textTransform:"uppercase",textAlign:h==="Product"?"left":"right",whiteSpace:"nowrap"}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {list.map((p,i)=>{
+                      const r=calcProduct(p);
+                      const productTarget=catEntry(p.product).targetMarginPct;
+                      const status=p.netSales<=0&&p.gross>0?"GIFTED":p.marginPct<productTarget?"LOW":"OK";
+                      const sc=status==="GIFTED"?RD:status==="LOW"?"#f59e0b":GR;
+                      return(
+                        <React.Fragment key={i}>
+                          <tr style={{borderBottom:expandedProduct===p.product?"none":"1px solid "+BR+"33",background:i%2===0?"transparent":S+"44",cursor:"pointer"}}
+                            onClick={()=>setExpandedProduct(expandedProduct===p.product?null:p.product)}>
+                            <td style={{padding:"7px 8px",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                              <span style={{fontFamily:ff,fontSize:9,color:sc,fontWeight:"bold",marginRight:6}}>{status}</span>
+                              <span style={{color:TX}}>{p.product}</span>
+                              {p.variants?.length>1&&<span style={{fontFamily:ff,fontSize:8,color:MU,marginLeft:4}}>{expandedProduct===p.product?"▲":"▼"} {p.variants.length}v</span>}
+                            </td>
+                            <td style={{padding:"7px 8px",color:MU,textAlign:"right"}}>{r.avgRetail>0?fmt(r.avgRetail):"—"}</td>
+                            <td style={{padding:"7px 8px",color:MU,textAlign:"right"}}>{r.varCostUnit>0?fmt(r.varCostUnit):"—"}</td>
+                            <td style={{padding:"7px 8px",color:r.contributionMargin>=productTarget?GR:RD,textAlign:"right",fontWeight:"bold"}}>{r.avgRetail>0?pct(r.contributionMargin):"—"}</td>
+                            <td style={{padding:"7px 8px",color:MU,textAlign:"right"}}>{r.breakEven>0?fmt(r.breakEven):"—"}</td>
+                            <td style={{padding:"7px 8px",color:p.marginPct>=productTarget?GR:RD,textAlign:"right",fontWeight:"bold"}}>{p.netSales>0?pct(p.marginPct):"GIFTED"}</td>
+                            <td style={{padding:"7px 8px",color:r.modelledMargin>=productTarget?GR:RD,textAlign:"right"}}>{r.avgRetail>0?pct(r.modelledMargin):"—"}</td>
+                            <td style={{padding:"7px 8px",color:Math.abs(r.variance)>5?RD:MU,textAlign:"right"}}>{r.avgRetail>0?(r.variance>=0?"+":"")+r.variance.toFixed(1)+"%":"—"}</td>
+                            {r.discountLevels.slice(0,4).map(d=>(
+                              <td key={d.disc} style={{padding:"7px 8px",textAlign:"right",color:d.viable?GR:RD,fontWeight:!d.viable?"bold":"normal"}}>
+                                {r.avgRetail>0?pct(d.margin):"—"}
+                              </td>
+                            ))}
+                          </tr>
+                          {/* Variant drilldown */}
+                          {expandedProduct===p.product&&p.variants?.length>1&&(
+                            <tr style={{borderBottom:"1px solid "+BR+"33"}}>
+                              <td colSpan={12} style={{padding:"6px 8px 10px 24px",background:S+"88"}}>
+                                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                                  {p.variants.map((v,j)=>(
+                                    <div key={j} style={{fontFamily:ff,fontSize:10,color:MU,background:S2,borderRadius:radius,padding:"4px 8px",border:"1px solid "+BR+"44"}}>
+                                      <span style={{color:TX,marginRight:6}}>{v.variant}</span>
+                                      <span>{v.units}u</span>
+                                      <span style={{marginLeft:8,color:A}}>{fmt(v.netSales)}</span>
+                                      <span style={{marginLeft:8,color:v.discRate>20?RD:MU}}>{v.discRate.toFixed(1)}% disc</span>
+                                      <span style={{marginLeft:8,color:v.marginPct<productTarget?RD:GR,fontWeight:"bold"}}>{v.marginPct.toFixed(1)}%</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{borderTop:"2px solid "+BR,background:S2}}>
+                      <td style={{padding:"7px 8px",color:A,fontWeight:"bold"}}>BLENDED</td>
+                      <td colSpan={2}/>
+                      <td style={{padding:"7px 8px",color:blended>=target?GR:RD,textAlign:"right",fontWeight:"bold"}}>{blended.toFixed(1)}%</td>
+                      <td colSpan={8}/>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <div style={{fontFamily:ff,fontSize:9,color:MU,marginTop:8}}>
+                Variance = Actual GM − Modelled GM. Red discount cells = below product target margin. Click product row to see variants.
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div style={{padding:fullPage?"12px 0 0":"10px 16px",display:"flex",alignItems:"center",gap:10,borderTop:"1px solid "+BR+"44",flexWrap:"wrap"}}>
+            {list.length>0&&<button onClick={()=>{if(window.confirm("Clear all product margin data?"))onUpdate([]);}}
+              style={{padding:"5px 12px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
+              Clear All
+            </button>}
+          </div>
         </div>
       )}
     </div>
@@ -2789,32 +2901,15 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts}){
 
 // ─── Targets Page ─────────────────────────────────────────────────────────────
 // ─── Margin Analysis Page ─────────────────────────────────────────────────────
-function MarginAnalysisPage({productMarginData,onProductMarginUpdate,targetMargin}){
-  const {S2,BR,A,MU,TX,ff,GR,RD,radius}=useTheme();
-  const list=productMarginData||[];
-  const target=targetMargin||55;
-  const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
-  const totalNet=list.reduce((s,p)=>s+p.netSales,0);
-  const totalGP=list.reduce((s,p)=>s+p.grossProfit,0);
-  const blended=totalNet>0?(totalGP/totalNet)*100:0;
+function MarginAnalysisPage({productMarginData,productCatalogue,onProductMarginUpdate,onProductCatalogueUpdate,targetMargin}){
   return(
     <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:12}}>
-        <div>
-          <div style={{fontFamily:ff,fontSize:10,letterSpacing:2,color:A,textTransform:"uppercase",marginBottom:4}}>Margin Analysis</div>
-          {list.length>0&&(
-            <div style={{fontFamily:ff,fontSize:12,color:MU}}>
-              {list.length} products · blended margin <span style={{color:blended>=target?GR:RD,fontWeight:"bold"}}>{blended.toFixed(1)}%</span>
-              {" "}· target {target}%
-              {" "}· {list.filter(p=>p.netSales>0&&p.marginPct<target).length+list.filter(p=>p.netSales<=0&&p.gross>0).length} flagged
-            </div>
-          )}
-        </div>
-      </div>
       <ProductMarginImport
-        products={list}
+        products={productMarginData||[]}
+        catalogue={productCatalogue||{}}
         onUpdate={onProductMarginUpdate}
-        targetMargin={target}
+        onCatalogueUpdate={onProductCatalogueUpdate}
+        targetMargin={targetMargin||55}
         fullPage
       />
     </div>
@@ -3209,6 +3304,10 @@ function App(){
     const updated={...monthData,[curKey]:{...curEntry,weeks:curWeeks,extras:curExtras,productMarginData:pm,label:selMonth.label,lastSaved:new Date().toLocaleString("en-AU")}};
     setMonthData(updated);autoSave(updated,fixed,settings);
   };
+  const updateProductCatalogue=pc=>{
+    const ns={...settings,productCatalogue:pc};
+    setSettings(ns);autoSave(monthData,fixed,ns);
+  };
   const updateFixed=async nf=>{setFixed(nf);await saveAll(monthData,nf,settings);setSaveMsg("Saved");setTimeout(()=>setSaveMsg(""),2000);};
   const updateSettings=ns=>{setSettings(ns);autoSave(monthData,fixed,ns);};
   const updateTheme=nt=>{
@@ -3389,7 +3488,9 @@ function App(){
             <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+4,padding:"24px 28px"}}>
               <MarginAnalysisPage
                 productMarginData={curEntry?.productMarginData||[]}
+                productCatalogue={settings?.productCatalogue||{}}
                 onProductMarginUpdate={updateProductMargin}
+                onProductCatalogueUpdate={updateProductCatalogue}
                 targetMargin={curWeeks[0]?.weekTargets?.gross_margin_target||55}
               />
             </div>
