@@ -20,13 +20,23 @@ function applyLightness(hex, lightness) {
     return "#"+[adj(r),adj(g),adj(b)].map(v=>v.toString(16).padStart(2,"0")).join("");
   } catch(e){ return hex; }
 }
+// Returns black or white depending on which has better contrast against bg
+function contrastColor(hex){
+  try{
+    const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+    const lum=0.2126*(r/255)**2.2+0.7152*(g/255)**2.2+0.0722*(b/255)**2.2;
+    return lum>0.179?"#111111":"#ffffff";
+  }catch(e){return "#ffffff";}
+}
 
 function buildTheme(t) {
   const l=t.lightness??50, ap=hex=>applyLightness(hex,l);
+  const accent=ap(t.accent);
   return {
-    A:ap(t.accent), BG:ap(t.bg), S:ap(t.surface), S2:ap(t.surface2),
+    A:accent, BG:ap(t.bg), S:ap(t.surface), S2:ap(t.surface2),
     BR:ap(t.border), TX:ap(t.text), MU:ap(t.muted),
     RD:ap(t.red), GR:ap(t.green), YL:ap(t.yellow),
+    OA:contrastColor(accent), // on-accent: text color to use on accent background
     ff:t.bodyFont||"Times New Roman", ffTitle:t.titleFont||"Times New Roman",
     radius:t.borderRadius??4,
     szHeaderTitle:t.headerTitleSize??22,
@@ -403,15 +413,20 @@ function parseShopify(raw){
     return parseInt(nums[nums.length-1])||0;
   };
 
+  // Skip section header lines (e.g. "SECTION 1 — REVENUE", "--- COGS ---")
+  const isSectionHeader=l=>(/^section\s+\d/i.test(l)||/^-{2,}/.test(l.trim())||(/^[A-Z\s\d—–-]{5,}$/.test(l.trim())&&!l.includes(":")));
+
   raw.split("\n").forEach(line=>{
     const low=line.toLowerCase().trim();
     if(!low)return;
+    if(isSectionHeader(line.trim()))return; // skip headers like "SECTION 2 — COGS"
 
     // ── Revenue fields ──────────────────────────────────────────────────────
     if(low.includes("gross sale")||low.includes("total sale")||low.includes("total revenue")){
       const v=getNum(line); if(v!==null)revenue.gross_sales=v;
-    } else if((low.includes("refund")||low.includes("return"))&&!low.includes("shipping")){
-      const v=getNum(line); if(v!==null)revenue.refunds=v;
+    } else if(low.includes("refund")&&!low.includes("shipping")&&!low.includes("reason")&&!low.includes("number of")&&!low.includes("total number")){
+      // Only capture the first clean refund line (e.g. "Refunds: 338.04"), not "Total Refund Amount" or "Refund Reason" lines
+      if(revenue.refunds===undefined){const v=getNum(line);if(v!==null)revenue.refunds=v;}
     } else if(low.includes("discount")&&!low.includes("collab")&&!low.includes("staff")&&!low.includes("influencer")&&!low.includes("code breakdown")){
       const v=getNum(line); if(v!==null)revenue.discounts=v;
     } else if(low.includes("shipping")&&(low.includes("income")||low.includes("revenue")||low.includes("collected")||low.includes("charged"))){
@@ -420,12 +435,14 @@ function parseShopify(raw){
       const v=getNum(line); if(v!==null)revenue.paypal_fees=v;
 
     // ── COGS fields ─────────────────────────────────────────────────────────
-    } else if((low.includes("manufactur")&&(low.includes("product")||low.includes("cogs")||low.includes("cost of good")))||low.includes("product cogs")||low.includes("mfg product")){
+    // "Manufacturing:" alone maps to manufacturing_product (the main COGS line)
+    } else if(low.includes("manufactur")&&!low.includes("ship")&&!low.includes("inbound")&&!low.includes("freight")){
       const v=getNum(line); if(v!==null)cogs.manufacturing_product=v;
     } else if((low.includes("manufactur")&&(low.includes("ship")||low.includes("inbound")||low.includes("freight")))||low.includes("inbound freight")||low.includes("mfg shipping")){
       const v=getNum(line); if(v!==null)cogs.manufacturing_shipping=v;
-    } else if(low.includes("number of order")||low.includes("order count")||low.includes("total order")||(low.includes("order")&&low.includes("satchel"))){
-      const v=getInt(line); if(v!==null)cogs.satchel_count=v;
+    } else if(low.includes("number of order")||low.includes("order count")||(low.includes("order")&&low.includes("satchel"))){
+      // "Number of Orders" → satchel count. Exclude "total order" to avoid confusing with revenue
+      const v=getInt(line); if(v!==null&&v>0)cogs.satchel_count=v;
     } else if(low.includes("other packaging")||low.includes("packaging cost")){
       const v=getNum(line); if(v!==null)cogs.other_packaging=v;
 
@@ -695,19 +712,19 @@ function E({value,onSave,style={},multiline=false,styleKey,onStyleSave}){
 }
 
 function TextStylePanel({onStyleSave,onClose,currentStyle}){
-  const {S2,BR,A,MU,TX,ff,radius}=useTheme();
+  const {S2,BR,A,OA,MU,TX,ff,radius}=useTheme();
   const [bold,setBold]=useState(currentStyle?.fontWeight==="bold"||currentStyle?.fontWeight===700);
   const [italic,setItalic]=useState(currentStyle?.fontStyle==="italic");
   const [size,setSize]=useState(parseInt(currentStyle?.fontSize)||12);
   const apply=()=>{onStyleSave({bold,italic,size});onClose();};
   return(
     <div style={{position:"absolute",top:"100%",left:0,zIndex:200,background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"10px 12px",display:"flex",gap:8,alignItems:"center",whiteSpace:"nowrap",boxShadow:"0 8px 24px #00000088"}}>
-      <button onClick={()=>setBold(b=>!b)} style={{background:bold?A:"transparent",border:"1px solid "+(bold?A:BR),color:bold?"#000":TX,fontFamily:ff,fontSize:11,fontWeight:"bold",padding:"3px 8px",cursor:"pointer",borderRadius:2}}>B</button>
-      <button onClick={()=>setItalic(i=>!i)} style={{background:italic?A:"transparent",border:"1px solid "+(italic?A:BR),color:italic?"#000":TX,fontFamily:ff,fontSize:11,fontStyle:"italic",padding:"3px 8px",cursor:"pointer",borderRadius:2}}>I</button>
+      <button onClick={()=>setBold(b=>!b)} style={{background:bold?A:"transparent",border:"1px solid "+(bold?A:BR),color:bold?OA:TX,fontFamily:ff,fontSize:11,fontWeight:"bold",padding:"3px 8px",cursor:"pointer",borderRadius:2}}>B</button>
+      <button onClick={()=>setItalic(i=>!i)} style={{background:italic?A:"transparent",border:"1px solid "+(italic?A:BR),color:italic?OA:TX,fontFamily:ff,fontSize:11,fontStyle:"italic",padding:"3px 8px",cursor:"pointer",borderRadius:2}}>I</button>
       <input type="number" value={size} min={7} max={32} onChange={e=>setSize(parseInt(e.target.value)||12)}
         style={{width:46,background:"transparent",border:"1px solid "+BR,color:TX,fontFamily:ff,fontSize:11,padding:"3px 6px",outline:"none",borderRadius:2,textAlign:"center"}}/>
       <span style={{fontFamily:ff,fontSize:10,color:MU}}>px</span>
-      <button onClick={apply} style={{background:A,border:"none",color:"#000",fontFamily:ff,fontSize:10,padding:"4px 10px",cursor:"pointer",borderRadius:2,fontWeight:"bold"}}>Apply</button>
+      <button onClick={apply} style={{background:A,border:"none",color:OA,fontFamily:ff,fontSize:10,padding:"4px 10px",cursor:"pointer",borderRadius:2,fontWeight:"bold"}}>Apply</button>
       <button onClick={onClose} style={{background:"transparent",border:"none",color:MU,fontFamily:ff,fontSize:12,cursor:"pointer",padding:"2px 4px"}}>×</button>
     </div>
   );
@@ -731,7 +748,7 @@ function Accordion({title,children,defaultOpen=false,accent=false}){
 
 // ─── Shopify Import ───────────────────────────────────────────────────────────
 function ShopifyImport({week,onChange,labels}){
-  const {S2,BR,A,S,TX,ff,MU,GR,RD,radius}=useTheme();
+  const {S2,BR,A,OA,S,TX,ff,MU,GR,RD,radius}=useTheme();
   const bi=useBI();
   const [raw,setRaw]=useState(week.shopifyRaw||"");
   const [msg,setMsg]=useState("");
@@ -766,8 +783,8 @@ function ShopifyImport({week,onChange,labels}){
       <textarea value={raw} onChange={e=>setRaw(e.target.value)} placeholder="Paste Shopify CSV or tab-separated export here..." rows={4}
         style={{width:"100%",boxSizing:"border-box",background:S,border:"1px solid "+BR,color:TX,padding:"10px 12px",fontFamily:"monospace",fontSize:12,outline:"none",borderRadius:radius,resize:"vertical"}}/>
       <div style={{display:"flex",alignItems:"center",gap:12,marginTop:10,flexWrap:"wrap"}}>
-        <button onClick={apply} style={{padding:"8px 18px",background:A,border:"none",color:"#000",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
-          <E value={labels.sec_shopify_btn} onSave={v=>labels._save("sec_shopify_btn",v)} style={{fontFamily:ff,fontSize:12,color:"#000"}}/>
+        <button onClick={apply} style={{padding:"8px 18px",background:A,border:"none",color:OA,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
+          <E value={labels.sec_shopify_btn} onSave={v=>labels._save("sec_shopify_btn",v)} style={{fontFamily:ff,fontSize:12,color:OA}}/>
         </button>
         {msg&&<span style={{fontFamily:ff,fontSize:12,color:msg.includes("No")?RD:GR}}>{msg}{detail.length?<span style={{color:MU,fontSize:11}}> ({detail.join(", ")})</span>:null}</span>}
       </div>
@@ -780,7 +797,7 @@ function ConfirmModal({message,onConfirm,onCancel}){
   const {BG,S2,BR,A,RD,MU,TX,ff,radius}=useTheme();
   return(
     <div style={{position:"fixed",inset:0,zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div onClick={onCancel} style={{position:"absolute",inset:0,background:"#000000bb"}}/>
+      <div onClick={onCancel} style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.5)"}}/>
       <div style={{position:"relative",zIndex:1,background:S2,border:"1px solid "+BR,borderRadius:radius+4,padding:"28px 32px",minWidth:320,maxWidth:420,boxShadow:"0 20px 60px #00000099",textAlign:"center"}}>
         <div style={{fontFamily:ff,fontSize:14,color:TX,marginBottom:20,lineHeight:1.7}}>{message}</div>
         <div style={{display:"flex",gap:10,justifyContent:"center"}}>
@@ -842,7 +859,7 @@ function ClearAll({onClear}){
 
 // ─── Week Form ────────────────────────────────────────────────────────────────
 function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,labels}){
-  const {S,S2,BR,A,MU,YL,RD,TX,ff,radius}=useTheme();
+  const {S,S2,BR,A,OA,MU,YL,RD,TX,ff,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   const bi=useBI();
@@ -866,7 +883,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
     const hasFixed=isFixed&&n(fixed?.values?.[key])>0;
     const hasMonthly=isMonthly&&n(fixed?.monthlyValues?.[key])>0;
     const weekHasVal=week.opex?.[key]!=="";
-    const tint=!weekHasVal&&(hasFixed||hasMonthly)?"#1c1730":undefined;
+    const tint=!weekHasVal&&(hasFixed||hasMonthly)?A+"22":undefined;
     const displayVal=weekHasVal?week.opex[key]:hasFixed?fixed.values[key]:hasMonthly?(n(fixed.monthlyValues[key])/4).toFixed(2):"";
     return(
       <Fld key={key} label={<E value={label} onSave={nl=>renameOpex(key,nl)} style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:0.8}}/>}>
@@ -930,7 +947,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
           <div style={{fontFamily:ff,fontSize:13,color:YL,marginTop:8}}><E value={labels.field_satchel_total} onSave={v=>labels._save("field_satchel_total",v)} style={{color:YL,fontFamily:ff,fontSize:13}}/>: {fmtD(c.satchel)}</div>
         </div>
         {c.discReclass.serviceRecoveryCOGS>0&&(
-          <div style={{marginTop:10,background:"#1a0a0a",border:"1px solid "+RD+"44",borderRadius:radius+1,padding:"10px 14px"}}>
+          <div style={{marginTop:10,background:RD+"15",border:"1px solid "+RD+"44",borderRadius:radius+1,padding:"10px 14px"}}>
             <span style={{fontFamily:ff,fontSize:11,color:RD}}>Service Recovery COGS auto-added: {fmtD(c.discReclass.serviceRecoveryCOGS)} (from discount breakdown above)</span>
           </div>
         )}
@@ -1093,7 +1110,7 @@ function TargetsPanel({calc,week,labels}){
 
 // ─── Discount Breakdown (per-code) ────────────────────────────────────────────
 function DiscountBreakdown({week,onChange,labels}){
-  const {A,MU,BR,S2,S,TX,GR,RD,YL,BG,ff,radius}=useTheme();
+  const {A,OA,MU,BR,S2,S,TX,GR,RD,YL,BG,ff,radius}=useTheme();
   const bi=useBI();
   const totalDiscounts=n(week.revenue.discounts);
   const codeData=week.codeData||emptyCodeData();
@@ -1205,7 +1222,7 @@ function DiscountBreakdown({week,onChange,labels}){
           placeholder={"RESHIP-FAULTY\t$120.00\t3\nEXCHANGE-SE\t$85.00\t2\n(code · retail amount · number of orders)"}
           style={{width:"100%",boxSizing:"border-box",background:S,border:"1px solid "+BR,color:TX,padding:"8px 10px",fontFamily:"monospace",fontSize:11,outline:"none",borderRadius:radius,resize:"vertical"}}/>
         <div style={{display:"flex",alignItems:"center",gap:10,marginTop:8}}>
-          <button onClick={applyDiscShopify} style={{padding:"7px 16px",background:A,border:"none",color:"#000",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>AUTOFILL FROM DATA</button>
+          <button onClick={applyDiscShopify} style={{padding:"7px 16px",background:A,border:"none",color:OA,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>AUTOFILL FROM DATA</button>
           {discMsg&&<span style={{fontFamily:ff,fontSize:11,color:discMsg.includes("No")||discMsg.includes("Paste")?RD:GR}}>{discMsg}</span>}
         </div>
       </div>
@@ -1354,7 +1371,7 @@ function DiscountBreakdown({week,onChange,labels}){
 
 // ─── Fixed Costs Page ─────────────────────────────────────────────────────────
 function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,labels}){
-  const {S,S2,BR,A,MU,TX,GR,ff,radius}=useTheme();
+  const {S,S2,BR,A,MU,TX,GR,BG,ff,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const displayKeys=keys.filter(k=>!k.sub); // hide sub-keys from fixed costs
   const fixedKeys=fixed?.fixedKeys||[];
@@ -1389,12 +1406,12 @@ function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,label
           const val=part==="weekly"?(fixed?.values?.[key]||""):(fixed?.monthlyValues?.[key]||"");
           const weeklyAmt=isM?n(fixed?.monthlyValues?.[key]||0)/4:0;
           return(
-            <div key={key} style={{background:isActive?"#1c1730":S2,border:"1px solid "+(isActive?A:BR),borderRadius:radius+1,padding:"10px 12px"}}>
+            <div key={key} style={{background:isActive?A+"22":S2,border:"1px solid "+(isActive?A:BR),borderRadius:radius+1,padding:"10px 12px"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                 <E value={label} onSave={nl=>renameKey(key,nl)} style={{fontFamily:ff,fontSize:11,color:isActive?A:MU,textTransform:"uppercase",letterSpacing:0.8}}/>
                 <button
                   onClick={()=>part==="weekly"?toggleWeekly(key):toggleMonthly(key)}
-                  style={{background:isActive?A:"transparent",border:"1px solid "+(isActive?A:BR),color:isActive?"#000":MU,padding:"2px 8px",fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,whiteSpace:"nowrap",marginLeft:8,textTransform:"uppercase"}}>
+                  style={{background:isActive?A:"transparent",border:"1px solid "+(isActive?A:BR),color:isActive?OA:MU,padding:"2px 8px",fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1,whiteSpace:"nowrap",marginLeft:8,textTransform:"uppercase"}}>
                   {isActive?"Active":"Set"}
                 </button>
               </div>
@@ -1456,17 +1473,17 @@ function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,label
       <div style={{padding:"16px 20px",background:S2,border:"1px solid "+BR,borderRadius:radius+2}}>
         <div style={{fontFamily:ff,fontSize:10,letterSpacing:1.5,color:A,textTransform:"uppercase",marginBottom:12}}>Weekly Cost Summary</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12}}>
-          <div style={{background:"#0a0a0e",borderRadius:radius,padding:"10px 14px",borderLeft:"3px solid "+A}}>
+          <div style={{background:BG,borderRadius:radius,padding:"10px 14px",borderLeft:"3px solid "+A}}>
             <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:4}}>Weekly Fixed ({fixedKeys.length} items)</div>
             <div style={{fontFamily:ff,fontSize:16,color:A,fontWeight:"bold"}}>{fmtD(weeklyTotal)}</div>
             <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>fills at full amount each week</div>
           </div>
-          <div style={{background:"#0a0a0e",borderRadius:radius,padding:"10px 14px",borderLeft:"3px solid #7dd3fc"}}>
+          <div style={{background:BG,borderRadius:radius,padding:"10px 14px",borderLeft:"3px solid "+A}}>
             <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:4}}>Monthly Fixed ({monthlyFixedKeys.length} items)</div>
-            <div style={{fontFamily:ff,fontSize:16,color:"#7dd3fc",fontWeight:"bold"}}>{fmtD(monthlyTotal)}/mo</div>
+            <div style={{fontFamily:ff,fontSize:16,color:A,fontWeight:"bold"}}>{fmtD(monthlyTotal)}/mo</div>
             <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>{fmtD(weeklyFromMonthly)}/week (÷4)</div>
           </div>
-          <div style={{background:"#0a0a0e",borderRadius:radius,padding:"10px 14px",borderLeft:"3px solid "+GR}}>
+          <div style={{background:BG,borderRadius:radius,padding:"10px 14px",borderLeft:"3px solid "+GR}}>
             <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:4}}>Total Weekly Auto-Fill</div>
             <div style={{fontFamily:ff,fontSize:16,color:GR,fontWeight:"bold"}}>{fmtD(totalWeeklyImpact)}</div>
             <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>auto-applied to every week</div>
@@ -1480,15 +1497,16 @@ function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,label
 // ─── Settings Page ────────────────────────────────────────────────────────────
 const FONT_OPTIONS=["Times New Roman","Georgia","Garamond","Palatino","Helvetica","Arial","Inter","system-ui","monospace","Courier New"];
 const COLOR_PRESETS=[
-  {name:"Default",theme:{accent:"#d8b9ff",bg:"#0a0a0e",surface:"#12111a",surface2:"#1a1826",border:"#2a2540",text:"#e0e0e0",muted:"#777777",red:"#ff6b6b",green:"#6bffb8",yellow:"#ffd97d"}},
-  {name:"Deep Ocean",theme:{accent:"#7dd3fc",bg:"#020617",surface:"#0f172a",surface2:"#1e293b",border:"#334155",text:"#e2e8f0",muted:"#64748b",red:"#f87171",green:"#34d399",yellow:"#fbbf24"}},
-  {name:"Forest",theme:{accent:"#86efac",bg:"#030712",surface:"#0f1b12",surface2:"#172018",border:"#2d4a32",text:"#dcfce7",muted:"#6b7280",red:"#fca5a5",green:"#86efac",yellow:"#fde68a"}},
-  {name:"Rose",theme:{accent:"#fda4af",bg:"#0c0a0b",surface:"#1a1016",surface2:"#231520",border:"#4a2030",text:"#fce7f3",muted:"#9d8090",red:"#fb7185",green:"#6ee7b7",yellow:"#fde68a"}},
-  {name:"Slate",theme:{accent:"#94a3b8",bg:"#0f0f0f",surface:"#161616",surface2:"#1e1e1e",border:"#2a2a2a",text:"#d4d4d4",muted:"#737373",red:"#f87171",green:"#86efac",yellow:"#fcd34d"}},
+  {name:"Default",theme:{accent:"#d8b9ff",bg:"#0a0a0e",surface:"#12111a",surface2:"#1a1826",border:"#2a2540",text:"#e0e0e0",muted:"#777777",red:"#ff6b6b",green:"#6bffb8",yellow:"#ffd97d",lightness:50}},
+  {name:"Notion Light",theme:{accent:"#2383e2",bg:"#ffffff",surface:"#f7f7f5",surface2:"#efefef",border:"#e3e2e0",text:"#191919",muted:"#9b9b9b",red:"#eb5757",green:"#0f9153",yellow:"#d9730d",lightness:50,bodyFont:"Inter",titleFont:"Inter",borderRadius:6}},
+  {name:"Deep Ocean",theme:{accent:"#7dd3fc",bg:"#020617",surface:"#0f172a",surface2:"#1e293b",border:"#334155",text:"#e2e8f0",muted:"#64748b",red:"#f87171",green:"#34d399",yellow:"#fbbf24",lightness:50}},
+  {name:"Forest",theme:{accent:"#86efac",bg:"#030712",surface:"#0f1b12",surface2:"#172018",border:"#2d4a32",text:"#dcfce7",muted:"#6b7280",red:"#fca5a5",green:"#86efac",yellow:"#fde68a",lightness:50}},
+  {name:"Rose",theme:{accent:"#fda4af",bg:"#0c0a0b",surface:"#1a1016",surface2:"#231520",border:"#4a2030",text:"#fce7f3",muted:"#9d8090",red:"#fb7185",green:"#6ee7b7",yellow:"#fde68a",lightness:50}},
+  {name:"Slate",theme:{accent:"#94a3b8",bg:"#0f0f0f",surface:"#161616",surface2:"#1e1e1e",border:"#2a2a2a",text:"#d4d4d4",muted:"#737373",red:"#f87171",green:"#86efac",yellow:"#fcd34d",lightness:50}},
 ];
 
 function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLabelsSave}){
-  const {S2,BR,A,MU,TX,GR,RD,YL,ff,radius}=useTheme();
+  const {S2,BR,A,OA,MU,TX,GR,RD,YL,ff,radius}=useTheme();
   const [themeEdit,setThemeEdit]=useState({...DEFAULT_THEME,...theme});
   const [activeTab,setActiveTab]=useState("appearance");
   const [staff,setStaff]=useState(settings?.staff||DEFAULT_STAFF);
@@ -1510,7 +1528,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
       <div style={{display:"flex",gap:8,marginBottom:24,flexWrap:"wrap"}}>
         {["appearance","colours","targets","staff"].map(t=>(
           <button key={t} onClick={()=>setActiveTab(t)}
-            style={{padding:"8px 16px",background:activeTab===t?A:"transparent",border:"1px solid "+(activeTab===t?A:BR),color:activeTab===t?"#000":MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
+            style={{padding:"8px 16px",background:activeTab===t?A:"transparent",border:"1px solid "+(activeTab===t?A:BR),color:activeTab===t?OA:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
             {t}
           </button>
         ))}
@@ -1565,7 +1583,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
             ))}
           </div>
           <div style={{display:"flex",gap:10}}>
-            <button onClick={apply} style={{flex:1,padding:"11px 0",background:A,border:"none",color:"#000",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>{saved?"APPLIED!":"APPLY"}</button>
+            <button onClick={apply} style={{flex:1,padding:"11px 0",background:A,border:"none",color:OA,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>{saved?"APPLIED!":"APPLY"}</button>
             <button onClick={reset} style={{padding:"11px 20px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius}}>Reset</button>
           </div>
         </div>
@@ -1584,7 +1602,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
               </div>
             ))}
           </Grid>
-          <button onClick={apply} style={{marginTop:16,width:"100%",padding:"11px 0",background:A,border:"none",color:"#000",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>{saved?"APPLIED!":"APPLY COLOURS"}</button>
+          <button onClick={apply} style={{marginTop:16,width:"100%",padding:"11px 0",background:A,border:"none",color:OA,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>{saved?"APPLIED!":"APPLY COLOURS"}</button>
         </div>
       )}
       {activeTab==="staff"&&(
@@ -1719,8 +1737,8 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
       <div style={{display:"flex",gap:8,marginBottom:20}}>
         {[{key:"overview_part1",label:labels.overview_part1,i:0},{key:"overview_part2",label:labels.overview_part2,i:1}].map(({key,label,i})=>(
           <button key={i} onClick={()=>setPart2(i===1)}
-            style={{padding:"8px 16px",background:part2===(i===1)?A:"transparent",border:"1px solid "+(part2===(i===1)?A:BR),color:part2===(i===1)?"#000":MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
-            <E value={label} onSave={v=>labels._save(key,v)} style={{fontFamily:ff,fontSize:11,color:part2===(i===1)?"#000":MU}}/>
+            style={{padding:"8px 16px",background:part2===(i===1)?A:"transparent",border:"1px solid "+(part2===(i===1)?A:BR),color:part2===(i===1)?OA:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
+            <E value={label} onSave={v=>labels._save(key,v)} style={{fontFamily:ff,fontSize:11,color:part2===(i===1)?OA:MU}}/>
           </button>
         ))}
       </div>
@@ -2005,7 +2023,7 @@ function ComparePage({allMonthData,fixed,opexKeys,depts,labels}){
       <div style={{display:"flex",gap:8,marginBottom:24}}>
         {[["months","By Month"],["weeks","By Week"],["custom","Custom Range"]].map(([val,lbl])=>(
           <button key={val} onClick={()=>setMode(val)}
-            style={{padding:"7px 14px",background:mode===val?A:"transparent",border:"1px solid "+(mode===val?A:BR),color:mode===val?"#000":MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
+            style={{padding:"7px 14px",background:mode===val?A:"transparent",border:"1px solid "+(mode===val?A:BR),color:mode===val?OA:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
             {lbl}
           </button>
         ))}
@@ -2090,7 +2108,7 @@ function ComparePage({allMonthData,fixed,opexKeys,depts,labels}){
 
 // ─── Reports Page ─────────────────────────────────────────────────────────────
 function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts}){
-  const {S,S2,BR,A,MU,TX,GR,RD,ff,radius}=useTheme();
+  const {S,S2,BR,A,OA,MU,TX,GR,RD,ff,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   const [expanded,setExpanded]=useState(null);
@@ -2166,10 +2184,10 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts}){
               </div>
             </div>
             {delConfirm===key&&(
-              <div style={{padding:"16px 18px",background:"#1a0a0a",border:"1px solid "+RD,margin:"0 0 4px"}}>
+              <div style={{padding:"16px 18px",background:RD+"15",border:"1px solid "+RD,margin:"0 0 4px"}}>
                 <div style={{fontFamily:ff,fontSize:13,color:RD,marginBottom:12}}>Delete {mLabel}? This cannot be undone.</div>
                 <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>deleteMonth(key)} style={{padding:"8px 16px",background:RD,border:"none",color:"#000",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold"}}>Delete</button>
+                  <button onClick={()=>deleteMonth(key)} style={{padding:"8px 16px",background:RD,border:"none",color:OA,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold"}}>Delete</button>
                   <button onClick={()=>setDelConfirm(null)} style={{padding:"8px 16px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius}}>Cancel</button>
                 </div>
               </div>
@@ -2194,7 +2212,7 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts}){
                     )}
                     <div style={{display:"flex",gap:10,marginTop:16}}>
                       <button onClick={()=>saveEdit(key)} disabled={saving}
-                        style={{flex:1,padding:"11px 0",background:A,border:"none",color:"#000",fontFamily:ff,fontSize:13,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
+                        style={{flex:1,padding:"11px 0",background:A,border:"none",color:OA,fontFamily:ff,fontSize:13,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
                         {saving?"SAVING...":"SAVE CHANGES"}
                       </button>
                       <button onClick={()=>{setEditing(null);setEditWeeks(null);}}
@@ -2343,7 +2361,7 @@ function TargetsPage({weeks,curWeeks,onUpdateWeeks,activeWeek,labels,monthData,s
             </div>
           )}
           <button onClick={autoCalc} disabled={!weeklyGoal}
-            style={{padding:"9px 20px",background:weeklyGoal?A:"transparent",border:"1px solid "+(weeklyGoal?A:BR),color:weeklyGoal?"#000":MU,fontFamily:ff,fontSize:11,cursor:weeklyGoal?"pointer":"not-allowed",borderRadius:radius,fontWeight:"bold",letterSpacing:1,textTransform:"uppercase"}}>
+            style={{padding:"9px 20px",background:weeklyGoal?A:"transparent",border:"1px solid "+(weeklyGoal?A:BR),color:weeklyGoal?OA:MU,fontFamily:ff,fontSize:11,cursor:weeklyGoal?"pointer":"not-allowed",borderRadius:radius,fontWeight:"bold",letterSpacing:1,textTransform:"uppercase"}}>
             Auto-Calculate All Targets
           </button>
         </div>
@@ -2454,7 +2472,7 @@ function AlertCard({alert}){
 
 // ─── Password Screen ──────────────────────────────────────────────────────────
 function PasswordScreen({onAuth,labels}){
-  const {BG,BR,TX,A,MU,RD,ff}=useTheme();
+  const {BG,BR,TX,A,OA,MU,RD,ff}=useTheme();
   const [pw,setPw]=useState(""),[ err,setErr]=useState(false);
   const check=()=>{if(!PASSWORD||pw===PASSWORD){onAuth();}else{setErr(true);setTimeout(()=>setErr(false),1400);}};
   return(
@@ -2469,7 +2487,7 @@ function PasswordScreen({onAuth,labels}){
           style={{width:"100%",boxSizing:"border-box",background:"transparent",border:"1px solid "+(err?RD:BR),color:TX,padding:"14px 16px",fontFamily:ff,fontSize:13,outline:"none",borderRadius:2,letterSpacing:4,textAlign:"center",marginBottom:10,transition:"border-color 0.2s"}}/>
         {err&&<div style={{color:RD,fontSize:10,textAlign:"center",letterSpacing:2,textTransform:"uppercase",marginBottom:8}}>Incorrect Password</div>}
         <button onClick={check} style={{width:"100%",padding:"13px 0",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:2,letterSpacing:5,textTransform:"uppercase"}}
-          onMouseEnter={e=>{e.target.style.background=A;e.target.style.color="#000";}} onMouseLeave={e=>{e.target.style.background="transparent";e.target.style.color=A;}}>
+          onMouseEnter={e=>{e.target.style.background=A;e.target.style.color=OA;}} onMouseLeave={e=>{e.target.style.background="transparent";e.target.style.color=A;}}>
           Enter
         </button>
       </div>
@@ -2670,8 +2688,8 @@ export default function App(){
                   <E value={selMonth?.label+" — "+(labels.header_subtitle||"weeks auto-dated Mon-Sun")} onSave={v=>labels._save("header_subtitle",v.includes("—")?v.split("—").slice(1).join("—").trim():v)} style={{fontFamily:ff,fontSize:11,color:MU}}/>
                 </div>
                 <button onClick={()=>handleExport()}
-                  style={{padding:"9px 16px",background:copied?A:"transparent",border:"1px solid "+A,color:copied?"#000":A,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
-                  <E value={labels.btn_generate_export} onSave={v=>labels._save("btn_generate_export",v)} style={{fontFamily:ff,fontSize:11,color:copied?"#000":A}}/>{copied?" ✓":""}
+                  style={{padding:"9px 16px",background:copied?A:"transparent",border:"1px solid "+A,color:copied?OA:A,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
+                  <E value={labels.btn_generate_export} onSave={v=>labels._save("btn_generate_export",v)} style={{fontFamily:ff,fontSize:11,color:copied?OA:A}}/>{copied?" ✓":""}
                 </button>
               </div>
 
