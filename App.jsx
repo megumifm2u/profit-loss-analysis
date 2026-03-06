@@ -3364,11 +3364,13 @@ function ComparePage({allMonthData,fixed,opexKeys,depts,labels}){
 }
 
 // ─── Reports Page ─────────────────────────────────────────────────────────────
-function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts}){
-  const {S,S2,BR,A,MU,TX,GR,RD,ff,radius}=useTheme();
+function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts,rosterSaves,onDeleteRosterSave}){
+  const {S,S2,BR,A,MU,TX,GR,RD,YL,ff,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   const [expanded,setExpanded]=useState(null);
+  const [rosterOpen,setRosterOpen]=useState(false);
+  const [rosterExpanded,setRosterExpanded]=useState(null);
   const [editing,setEditing]=useState(null);
   const [editWeeks,setEditWeeks]=useState(null);
   const [editExtras,setEditExtras]=useState(null);
@@ -3383,7 +3385,7 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts}){
     document.addEventListener("mousedown",close);return()=>document.removeEventListener("mousedown",close);
   },[]);
   const allKeys=Object.keys(monthData).sort().reverse();
-  if(!allKeys.length)return(
+  if(!allKeys.length&&!(rosterSaves||[]).length)return(
     <div style={{textAlign:"center",padding:"60px 20px",color:MU,fontFamily:ff}}>
       <div style={{fontSize:28,marginBottom:12,opacity:0.3}}>-</div>
       <div>No saved data yet. Data saves automatically as you enter it.</div>
@@ -3395,6 +3397,103 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts}){
   const stubLabels={...DEFAULT_LABELS,_save:()=>{}};
   return(
     <div>
+      {/* Roster Calculator Saves */}
+      {(rosterSaves||[]).length>0&&(
+        <div style={{border:"1px solid "+A+"44",borderRadius:radius+2,marginBottom:20,overflow:"visible"}}>
+          <div onClick={()=>setRosterOpen(o=>!o)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",background:rosterOpen?S2:"transparent",borderRadius:rosterOpen?(radius+2)+"px "+(radius+2)+"px 0 0":radius+2+"px",cursor:"pointer"}}>
+            <div>
+              <div style={{fontFamily:ff,fontSize:13,color:A,letterSpacing:1.5,textTransform:"uppercase"}}>Roster Calculator — Saved Plans</div>
+              <div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:2}}>{(rosterSaves||[]).length} saved roster plan{(rosterSaves||[]).length!==1?"s":""}</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={A} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="9" x2="9" y2="21"/><line x1="15" y1="9" x2="15" y2="21"/>
+              </svg>
+              <span style={{fontFamily:ff,fontSize:20,color:MU,lineHeight:1}}>{rosterOpen?"-":"+"}</span>
+            </div>
+          </div>
+          {rosterOpen&&(
+            <div style={{padding:"16px",borderTop:"1px solid "+BR,background:S}}>
+              {(rosterSaves||[]).slice().reverse().map((entry,ri)=>{
+                const idx=(rosterSaves.length-1)-ri;
+                const isOpen=rosterExpanded===idx;
+                return(
+                  <div key={idx} style={{border:"1px solid "+BR,borderRadius:radius+2,marginBottom:8,overflow:"hidden"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 14px",background:isOpen?S2:"transparent",cursor:"pointer"}} onClick={()=>setRosterExpanded(isOpen?null:idx)}>
+                      <div>
+                        <div style={{fontFamily:ff,fontSize:13,color:TX}}>{entry.weekLabel||"Untitled Roster"}</div>
+                        <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>Saved {entry.savedAt||"—"} · Tier {entry.tier||"—"} · {entry.totalStaff||0} staff</div>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <div style={{textAlign:"right"}}>
+                          <div style={{fontFamily:ff,fontSize:13,color:GR}}>{entry.totalWages||"—"}</div>
+                          <div style={{fontFamily:ff,fontSize:10,color:MU}}>wages + {entry.adCap||"—"} ad cap</div>
+                        </div>
+                        <button onClick={e=>{e.stopPropagation();if(window.confirm("Delete this roster plan?"))onDeleteRosterSave(idx);}}
+                          style={{background:"transparent",border:"1px solid "+BR,color:MU,padding:"3px 8px",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius}}
+                          onMouseEnter={e=>e.currentTarget.style.borderColor=RD} onMouseLeave={e=>e.currentTarget.style.borderColor=BR}>×</button>
+                        <span style={{fontFamily:ff,fontSize:18,color:MU,lineHeight:1}}>{isOpen?"-":"+"}</span>
+                      </div>
+                    </div>
+                    {isOpen&&(
+                      <div style={{padding:"14px 16px",borderTop:"1px solid "+BR,background:S}}>
+                        {/* Revenue context */}
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
+                          {[["Last Week Gross",entry.rev1],["Week Before",entry.rev2],["Forecast",entry.forecast]].map(([l,v])=>(
+                            <div key={l} style={{background:S2,border:"1px solid "+BR,borderRadius:radius,padding:"8px 10px"}}>
+                              <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:2}}>{l}</div>
+                              <div style={{fontFamily:ff,fontSize:13,color:TX}}>{v||"—"}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Tier & ad cap */}
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
+                          {[["Tier",entry.tier],["Ad Spend Cap",entry.adCap],["Total Hours",entry.totalHours],["Wages % Net Rev",entry.wagesPct]].map(([l,v])=>(
+                            <div key={l} style={{background:S2,border:"1px solid "+BR,borderRadius:radius,padding:"8px 10px"}}>
+                              <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:2}}>{l}</div>
+                              <div style={{fontFamily:ff,fontSize:13,color:l==="Tier"?A:TX}}>{v||"—"}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Staff breakdown */}
+                        {entry.staffLines&&entry.staffLines.length>0&&(
+                          <div>
+                            <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Staff</div>
+                            {entry.staffLines.map((s,si)=>(
+                              <div key={si} style={{display:"flex",justifyContent:"space-between",padding:"7px 10px",background:si%2===0?S2:"transparent",borderRadius:radius,marginBottom:2}}>
+                                <div>
+                                  <span style={{fontFamily:ff,fontSize:12,color:TX,marginRight:8}}>{s.name}</span>
+                                  <span style={{fontFamily:ff,fontSize:10,color:MU}}>{s.role} · {s.depts}</span>
+                                </div>
+                                <div style={{textAlign:"right"}}>
+                                  <span style={{fontFamily:ff,fontSize:12,color:TX}}>{s.finalHrs}hrs</span>
+                                  <span style={{fontFamily:ff,fontSize:11,color:MU,marginLeft:8}}>{s.cost}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {/* Tasks */}
+                        {entry.taskLines&&entry.taskLines.length>0&&(
+                          <div style={{marginTop:10}}>
+                            <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Special Tasks</div>
+                            {entry.taskLines.map((t,ti)=>(
+                              <div key={ti} style={{fontFamily:ff,fontSize:11,color:MU,padding:"4px 0"}}>{t.name} — {t.hrs}hrs ({t.dept1}{t.dept2?"+"+t.dept2:""})</div>
+                            ))}
+                          </div>
+                        )}
+                        {entry.notes&&(
+                          <div style={{marginTop:10,padding:"10px 12px",background:A+"0f",border:"1px solid "+A+"33",borderRadius:radius,fontFamily:ff,fontSize:11,color:TX,lineHeight:1.7}} dangerouslySetInnerHTML={{__html:entry.notes}}/>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
       <SH>All Saved Months ({allKeys.length})</SH>
       {allKeys.map(key=>{
         const md=monthData[key]||{};
@@ -3779,6 +3878,463 @@ function PasswordScreen({onAuth,labels}){
   );
 }
 
+// ─── Roster Calculator Modal ──────────────────────────────────────────────────
+function RosterCalculatorModal({onClose,curWeeks,monthData,settings,onSaveRosterEntry}){
+  const {BG,S,S2,BR,A,MU,TX,GR,RD,YL,ff,radius}=useTheme();
+
+  // ── Date helpers ──
+  function getWeekLabel(){
+    const now=new Date();
+    const day=now.getDay();
+    const diffToMon=day===0?-6:1-day;
+    const mon=new Date(now);mon.setDate(now.getDate()+diffToMon+7);
+    const sun=new Date(mon);sun.setDate(mon.getDate()+6);
+    const fmt=d=>d.toLocaleDateString("en-AU",{day:"numeric",month:"short"});
+    return fmt(mon)+" – "+fmt(sun);
+  }
+
+  // Get last 2 weeks gross from P&L data
+  function getRecentGross(){
+    // Collect all weeks across all months, sorted by weekNum desc
+    const allWeeks=[];
+    Object.values(monthData||{}).forEach(md=>{
+      (md.weeks||[]).forEach(w=>{
+        const g=parseFloat(w?.revenue?.gross_sales)||0;
+        if(g>0)allWeeks.push({label:w.label,gross:g,dateRange:w.dateRange});
+      });
+    });
+    // Also look at curWeeks
+    (curWeeks||[]).forEach(w=>{
+      const g=parseFloat(w?.revenue?.gross_sales)||0;
+      if(g>0&&!allWeeks.find(x=>x.label===w.label))allWeeks.push({label:w.label,gross:g,dateRange:w.dateRange});
+    });
+    // Return last 2 in reverse order
+    const recent=allWeeks.slice(-2).reverse();
+    return {rev1:recent[0]?.gross||"", rev2:recent[1]?.gross||""};
+  }
+
+  const {rev1:initRev1,rev2:initRev2}=getRecentGross();
+
+  // ── Constants ──
+  const DEPTS=['operations','marketing','logistics','retail','custsvc','hr'];
+  const DEPT_LABELS={operations:'Operations',marketing:'Marketing',logistics:'Logistics',retail:'Retail',custsvc:'Customer Svc',hr:'HR'};
+  const TIERS={
+    A:{name:'Tier A — Quiet Week',   desc:'Forecast below $24K. Hold costs. No new collabs.',    adCap:6570, roas:'3.3x',color:RD},
+    B:{name:'Tier B — Standard Week',desc:'Forecast $24K–$30K. Standard operations.',            adCap:9330, roas:'3.0x',color:YL},
+    C:{name:'Tier C — Strong Week',  desc:'Forecast above $30K. Collabs and gifting permitted.', adCap:11169,roas:'2.9x',color:GR},
+  };
+
+  function uid(){return '_'+Math.random().toString(36).slice(2,9);}
+  function fmt(v){return '$'+Math.round(v).toLocaleString('en-AU');}
+  function fmtD(v){return '$'+Number(v).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2});}
+
+  const [rev1,setRev1]=useState(String(initRev1));
+  const [rev2,setRev2]=useState(String(initRev2));
+  const [revForecast,setRevForecast]=useState("");
+  const [confidence,setConfidence]=useState("medium");
+  const [tierOverride,setTierOverride]=useState("auto");
+  const [weekDate,setWeekDate]=useState(getWeekLabel());
+  const [hrOverrides,setHrOverrides]=useState({});
+  const [saveDone,setSaveDone]=useState(false);
+
+  const [tasks,setTasks]=useState([
+    {id:uid(),name:'Stock take',hrs:6,dept1:'logistics',dept2:''},
+    {id:uid(),name:'Photoshoot',hrs:4,dept1:'marketing',dept2:'operations'},
+    {id:uid(),name:'Product launch',hrs:5,dept1:'custsvc',dept2:'marketing'},
+  ]);
+
+  const [staff,setStaff]=useState([
+    {id:uid(),name:'Bella', role:'Operations',  rate:30.00,fixed:true, depts:['operations'],        hrs:{A:35,B:35,C:35}},
+    {id:uid(),name:'Meg',   role:'Admin / Ops', rate:37.13,fixed:false,depts:['operations'],        hrs:{A:18,B:20,C:24}},
+    {id:uid(),name:'Jimmy', role:'Specialist',  rate:34.90,fixed:false,depts:['operations'],        hrs:{A:5, B:5, C:8 }},
+    {id:uid(),name:'Lila M',role:'Logistics',   rate:26.55,fixed:false,depts:['logistics'],         hrs:{A:8, B:10,C:13}},
+    {id:uid(),name:'Lila E',role:'Support',     rate:19.91,fixed:false,depts:['logistics','retail'],hrs:{A:3, B:3, C:5 }},
+    {id:uid(),name:'Amy',   role:'Support',     rate:16.60,fixed:false,depts:['retail'],            hrs:{A:4, B:4, C:6 }},
+    {id:uid(),name:'Rhea',  role:'Customer Svc',rate:30.00,fixed:false,depts:['custsvc'],           hrs:{A:6, B:8, C:10}},
+    {id:uid(),name:'Chloe', role:'Customer Svc',rate:30.00,fixed:false,depts:['custsvc'],           hrs:{A:5, B:5, C:5 }},
+  ]);
+
+  // New staff form
+  const [newName,setNewName]=useState(""); const [newRole,setNewRole]=useState("");
+  const [newDept1,setNewDept1]=useState("operations"); const [newDept2,setNewDept2]=useState("");
+  const [newRate,setNewRate]=useState(""); const [newHrsB,setNewHrsB]=useState("");
+
+  // ── Tier calc ──
+  function getTier(){
+    if(tierOverride!=='auto')return tierOverride;
+    const fc=parseFloat(revForecast)||0;
+    const r1=parseFloat(rev1)||0;
+    const r2=parseFloat(rev2)||0;
+    if(!fc&&!r1)return null;
+    const avg=(r1&&r2)?(r1+r2)/2:r1||r2;
+    let bl=fc>0?fc*.65+avg*.35:avg;
+    if(confidence==='low')bl*=.88;
+    if(bl>=30000)return 'C';
+    if(bl>=24000)return 'B';
+    return 'A';
+  }
+
+  function getTaskAdjForStaff(s){
+    let extra=0;
+    tasks.forEach(t=>{
+      if(!t.name||!t.hrs)return;
+      if(s.depts.includes(t.dept1))extra+=Number(t.hrs);
+      else if(t.dept2&&s.depts.includes(t.dept2))extra+=Math.ceil(Number(t.hrs)/2);
+    });
+    return extra;
+  }
+
+  const tier=getTier();
+  const t=tier?TIERS[tier]:null;
+  const tierColor=tier?TIERS[tier].color:MU;
+
+  // ── Staff calcs ──
+  const staffCalc=staff.map(s=>{
+    const base=s.hrs[tier||'B']||s.hrs['B']||0;
+    const adj=getTaskAdjForStaff(s);
+    const ovr=hrOverrides[s.id];
+    const final=ovr!==undefined?ovr:base+adj;
+    const cost=final*s.rate;
+    return{...s,base,adj,final,cost};
+  });
+  const tHrs=staffCalc.reduce((s,x)=>s+x.final,0);
+  const tCost=staffCalc.reduce((s,x)=>s+x.cost,0);
+  const fc=parseFloat(revForecast)||0;
+  const r1p=parseFloat(rev1)||0;
+  const netRev=fc>0?fc*.888:(r1p>0?r1p*.888:0);
+  const wPct=netRev>0?tCost/netRev*100:null;
+  const adCap=t?t.adCap:0;
+
+  // ── Notes ──
+  const notes=[];
+  if(!tier)notes.push('Enter a revenue forecast to get your tier and ad spend cap.');
+  tasks.forEach(tk=>{if(!tk.name||!tk.hrs)return;let line=`<strong>${tk.name}</strong>: ${tk.hrs} hrs → ${DEPT_LABELS[tk.dept1]}`;if(tk.dept2)line+=` + ${DEPT_LABELS[tk.dept2]} (split)`;notes.push(line);});
+  if(wPct!==null&&wPct>15)notes.push(`<strong>⚠ Wages at ${wPct.toFixed(1)}%</strong> — above 15% benchmark.`);
+  if(tier==='A')notes.push('<strong>Tier A:</strong> No new collab activations. Hold all discretionary spend.');
+  if(tier==='C')notes.push('<strong>Tier C:</strong> Gifting and collab activation permitted. Monitor ROAS daily.');
+  if(confidence==='low'&&tier)notes.push('<strong>Low confidence:</strong> Upgrade tier mid-week if revenue tracks ahead of plan.');
+
+  // ── Forecast note ──
+  const r1v=parseFloat(rev1)||0; const r2v=parseFloat(rev2)||0; const fcv=parseFloat(revForecast)||0;
+  let forecastNote='Enter revenue figures to get a tier recommendation.';
+  if(r1v||r2v||fcv){
+    const avg=(r1v&&r2v)?(r1v+r2v)/2:r1v||r2v;
+    let p=[];
+    if(avg>0)p.push('Recent avg: '+fmt(avg));
+    if(fcv>0)p.push('Forecast: '+fmt(fcv));
+    if(confidence==='low')p.push('Low confidence → conservative');
+    forecastNote=p.join(' · ')+(tier?' → Tier '+tier+' recommended':'');
+  }
+
+  // ── Actions ──
+  function addTask(){setTasks(prev=>[...prev,{id:uid(),name:'',hrs:0,dept1:'operations',dept2:''}]);}
+  function removeTask(i){setTasks(prev=>prev.filter((_,idx)=>idx!==i));}
+  function updateTask(i,field,val){setTasks(prev=>{const n=[...prev];n[i]={...n[i],[field]:val};return n;});}
+
+  function addStaff(){
+    if(!newName.trim()){return;}
+    const hrsB=parseInt(newHrsB)||0;
+    const s={id:uid(),name:newName.trim(),role:newRole||'Staff',rate:parseFloat(newRate)||0,fixed:false,depts:newDept2?[newDept1,newDept2]:[newDept1],hrs:{A:Math.max(0,hrsB-3),B:hrsB,C:Math.min(hrsB+4,Math.round(hrsB*1.2))}};
+    setStaff(prev=>[...prev,s]);
+    setNewName("");setNewRole("");setNewRate("");setNewHrsB("");setNewDept1("operations");setNewDept2("");
+  }
+  function removeStaff(i){if(!window.confirm(`Remove ${staff[i].name} from the roster?`))return;setHrOverrides(prev=>{const n={...prev};delete n[staff[i].id];return n;});setStaff(prev=>prev.filter((_,idx)=>idx!==i));}
+  function setHrOverride(id,val){setHrOverrides(prev=>({...prev,[id]:parseInt(val)||0}));}
+  function resetOverrides(){setHrOverrides({});}
+
+  function saveToReports(){
+    const entry={
+      weekLabel:weekDate||'Untitled',
+      savedAt:new Date().toLocaleDateString("en-AU"),
+      tier:tier||"—",
+      rev1:rev1?fmt(parseFloat(rev1)):"—",
+      rev2:rev2?fmt(parseFloat(rev2)):"—",
+      forecast:revForecast?fmt(parseFloat(revForecast)):"—",
+      totalHours:tHrs+"hrs",
+      totalWages:fmtD(tCost),
+      adCap:adCap?fmt(adCap):"—",
+      wagesPct:wPct!==null?wPct.toFixed(1)+"%":"—",
+      totalStaff:staff.length,
+      staffLines:staffCalc.map(s=>({name:s.name,role:s.role,depts:s.depts.map(d=>DEPT_LABELS[d]).join('+'),finalHrs:s.final,cost:fmtD(s.cost)})),
+      taskLines:tasks.filter(t=>t.name).map(t=>({name:t.name,hrs:t.hrs,dept1:DEPT_LABELS[t.dept1],dept2:t.dept2?DEPT_LABELS[t.dept2]:""})),
+      notes:notes.join('<br>'),
+    };
+    onSaveRosterEntry(entry);
+    setSaveDone(true);
+    setTimeout(()=>setSaveDone(false),2500);
+  }
+
+  // ── Styles ──
+  const inp={background:S2,border:"1px solid "+BR,color:TX,padding:"8px 10px",fontFamily:ff,fontSize:13,outline:"none",borderRadius:radius,width:"100%",boxSizing:"border-box"};
+  const lbl={fontFamily:ff,fontSize:10,color:MU,letterSpacing:0.5,marginBottom:4,display:"block"};
+  const card={background:S,border:"1px solid "+BR,borderRadius:radius+2,padding:"20px 22px",marginBottom:16};
+  const sectionLabel={fontFamily:ff,fontSize:9,letterSpacing:2,color:A,textTransform:"uppercase",marginBottom:14,display:"flex",alignItems:"center",gap:8};
+
+  const DEPT_COLORS={operations:"#2D6A9F",marketing:"#7B5EA7",logistics:YL,retail:GR,custsvc:RD,hr:MU};
+
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:1100,background:BG,overflowY:"auto"}}>
+      {/* Header */}
+      <div style={{borderBottom:"1px solid "+BR,padding:"0 24px",position:"sticky",top:0,background:BG,zIndex:10}}>
+        <div style={{maxWidth:1200,margin:"0 auto",padding:"18px 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontFamily:ff,fontSize:9,letterSpacing:4,color:A,textTransform:"uppercase",marginBottom:3}}>Finance Operations</div>
+            <h1 style={{margin:0,fontFamily:ff,fontSize:20,fontWeight:"normal",letterSpacing:2,color:TX,textTransform:"uppercase"}}>Roster & Ad Spend Calculator</h1>
+          </div>
+          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+            <button onClick={saveToReports} style={{padding:"8px 16px",background:saveDone?GR:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase",transition:"background 0.3s"}}>
+              {saveDone?"✓ Saved to Reports":"Save to Reports"}
+            </button>
+            <button onClick={onClose} style={{background:"transparent",border:"1px solid "+BR,color:MU,padding:"8px 14px",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}
+              onMouseEnter={e=>e.currentTarget.style.borderColor=A} onMouseLeave={e=>e.currentTarget.style.borderColor=BR}>
+              ← Back to P&L
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{maxWidth:1200,margin:"0 auto",padding:"28px 24px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+
+          {/* Revenue Context */}
+          <div style={card}>
+            <div style={sectionLabel}>Revenue Context</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+              <div>
+                <label style={lbl}>Last week gross ($)</label>
+                <input type="number" value={rev1} onChange={e=>setRev1(e.target.value)} style={inp} placeholder="32000"/>
+              </div>
+              <div>
+                <label style={lbl}>Week before that ($)</label>
+                <input type="number" value={rev2} onChange={e=>setRev2(e.target.value)} style={inp} placeholder="28000"/>
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+              <div>
+                <label style={lbl}>Forecast for roster week ($)</label>
+                <input type="number" value={revForecast} onChange={e=>setRevForecast(e.target.value)} style={inp} placeholder="e.g. 30000"/>
+              </div>
+              <div>
+                <label style={lbl}>Forecast confidence</label>
+                <select value={confidence} onChange={e=>setConfidence(e.target.value)} style={{...inp,appearance:"none"}}>
+                  <option value="high">High — strong pipeline</option>
+                  <option value="medium">Medium — typical</option>
+                  <option value="low">Low — uncertain</option>
+                </select>
+              </div>
+            </div>
+            <div style={{padding:"8px 10px",background:S2,border:"1px solid "+BR,borderRadius:radius,fontFamily:ff,fontSize:11,color:MU,lineHeight:1.6}}>
+              {forecastNote}
+            </div>
+          </div>
+
+          {/* Week Plan */}
+          <div style={card}>
+            <div style={sectionLabel}>Week Plan</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+              <div>
+                <label style={lbl}>Roster week (label)</label>
+                <input type="text" value={weekDate} onChange={e=>setWeekDate(e.target.value)} style={inp} placeholder="e.g. 10 Mar – 16 Mar"/>
+              </div>
+              <div>
+                <label style={lbl}>Override tier (optional)</label>
+                <select value={tierOverride} onChange={e=>setTierOverride(e.target.value)} style={{...inp,appearance:"none"}}>
+                  <option value="auto">Auto — use forecast</option>
+                  <option value="A">Force Tier A (&lt;$24K)</option>
+                  <option value="B">Force Tier B ($24–30K)</option>
+                  <option value="C">Force Tier C (&gt;$30K)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{fontFamily:ff,fontSize:9,letterSpacing:2,color:A,textTransform:"uppercase",marginBottom:10}}>Special Tasks This Week</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 60px 1fr 1fr 32px",gap:6,marginBottom:4}}>
+              {["Task name","Hrs","Primary dept","Secondary dept",""].map((h,i)=>(
+                <div key={i} style={{fontFamily:ff,fontSize:9,color:MU,letterSpacing:0.8,textTransform:"uppercase",padding:"0 2px"}}>{h}</div>
+              ))}
+            </div>
+            {tasks.map((tk,i)=>(
+              <div key={tk.id} style={{display:"grid",gridTemplateColumns:"1fr 60px 1fr 1fr 32px",gap:6,marginBottom:6,alignItems:"center"}}>
+                <input type="text" value={tk.name} onChange={e=>updateTask(i,'name',e.target.value)} style={{...inp,fontSize:12,padding:"6px 8px"}} placeholder="Task name"/>
+                <input type="number" value={tk.hrs} onChange={e=>updateTask(i,'hrs',Number(e.target.value)||0)} style={{...inp,fontSize:12,padding:"6px 8px"}} min="0" max="99"/>
+                <select value={tk.dept1} onChange={e=>updateTask(i,'dept1',e.target.value)} style={{...inp,fontSize:11,padding:"6px 8px",appearance:"none"}}>
+                  {DEPTS.map(d=><option key={d} value={d}>{DEPT_LABELS[d]}</option>)}
+                </select>
+                <select value={tk.dept2} onChange={e=>updateTask(i,'dept2',e.target.value)} style={{...inp,fontSize:11,padding:"6px 8px",appearance:"none"}}>
+                  <option value="">None (½ hrs)</option>
+                  {DEPTS.map(d=><option key={d} value={d}>{DEPT_LABELS[d]}</option>)}
+                </select>
+                <button onClick={()=>removeTask(i)} style={{background:"transparent",border:"1px solid "+BR,color:MU,width:30,height:30,cursor:"pointer",borderRadius:radius,fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}
+                  onMouseEnter={e=>e.currentTarget.style.borderColor=RD} onMouseLeave={e=>e.currentTarget.style.borderColor=BR}>×</button>
+              </div>
+            ))}
+            <button onClick={addTask} style={{width:"100%",padding:"7px 0",background:"transparent",border:"1px dashed "+BR,color:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,marginTop:4}}
+              onMouseEnter={e=>e.currentTarget.style.borderColor=A} onMouseLeave={e=>e.currentTarget.style.borderColor=BR}>
+              + Add task
+            </button>
+          </div>
+        </div>
+
+        {/* Tier Display */}
+        <div style={{...card,display:"flex",alignItems:"center",gap:20}}>
+          <div style={{fontFamily:ff,fontSize:60,fontWeight:"bold",color:tierColor,lineHeight:1,minWidth:56}}>{tier||"—"}</div>
+          <div style={{flex:1}}>
+            <div style={{fontFamily:ff,fontSize:14,color:TX,marginBottom:4}}>{t?t.name:"Enter revenue figures above"}</div>
+            <div style={{fontFamily:ff,fontSize:11,color:MU,lineHeight:1.5}}>{t?t.desc:"Tier calculated from forecast and recent actuals"}</div>
+          </div>
+          <div style={{textAlign:"right",flexShrink:0}}>
+            <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:1,marginBottom:3}}>Weekly ad spend cap</div>
+            <div style={{fontFamily:ff,fontSize:28,fontWeight:"bold",color:tier?tierColor:MU}}>{adCap>0?fmt(adCap):"—"}</div>
+            {t&&<>
+              <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>ROAS floor: {t.roas} minimum</div>
+              <div style={{fontFamily:ff,fontSize:10,color:MU}}>Daily: {fmt(adCap/7)} across all platforms</div>
+            </>}
+          </div>
+        </div>
+
+        {/* Staff Table */}
+        <div style={card}>
+          <div style={{...sectionLabel,marginBottom:8}}>Staff Hours <span style={{fontFamily:ff,fontSize:9,color:MU,letterSpacing:0,textTransform:"none",marginLeft:6}}>— edit name, role, dept or rate inline</span></div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead>
+                <tr style={{borderBottom:"2px solid "+BR}}>
+                  {["Name","Role","Departments","Rate/hr","Base","Task adj","Final hrs","Cost"].map((h,i)=>(
+                    <th key={h} style={{fontFamily:ff,fontSize:9,letterSpacing:0.8,textTransform:"uppercase",color:MU,padding:"0 8px 10px",textAlign:i>=3?"right":"left",fontWeight:"normal",whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {staffCalc.map((s,si)=>(
+                  <StaffRow key={s.id} s={s} si={si} tier={tier||'B'} DEPT_LABELS={DEPT_LABELS} DEPT_COLORS={DEPT_COLORS}
+                    onNameChange={v=>{setStaff(prev=>{const n=[...prev];n[si]={...n[si],name:v};return n;});}}
+                    onRoleChange={v=>{setStaff(prev=>{const n=[...prev];n[si]={...n[si],role:v};return n;});}}
+                    onRateChange={v=>{setStaff(prev=>{const n=[...prev];n[si]={...n[si],rate:parseFloat(v)||0};return n;});}}
+                    onHrChange={v=>setHrOverride(s.id,v)}
+                    onRemove={()=>removeStaff(si)}
+                    fmtD={fmtD} inp={inp} ff={ff} MU={MU} TX={TX} BR={BR} A={A} RD={RD} S2={S2} radius={radius}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Add Staff Row */}
+          <div style={{borderTop:"2px dashed "+BR,marginTop:10,paddingTop:14,display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}>
+            {[
+              {label:"Name",      el:<input type="text"   value={newName}  onChange={e=>setNewName(e.target.value)}  style={inp} placeholder="Name"/>},
+              {label:"Role",      el:<input type="text"   value={newRole}  onChange={e=>setNewRole(e.target.value)}  style={inp} placeholder="Role"/>},
+              {label:"Primary dept",el:<select value={newDept1} onChange={e=>setNewDept1(e.target.value)} style={{...inp,appearance:"none"}}>{DEPTS.map(d=><option key={d} value={d}>{DEPT_LABELS[d]}</option>)}</select>},
+              {label:"Secondary dept",el:<select value={newDept2} onChange={e=>setNewDept2(e.target.value)} style={{...inp,appearance:"none"}}><option value="">None</option>{DEPTS.map(d=><option key={d} value={d}>{DEPT_LABELS[d]}</option>)}</select>},
+              {label:"Rate/hr",   el:<input type="number" value={newRate}  onChange={e=>setNewRate(e.target.value)}  style={inp} placeholder="30.00" min="0" step="0.01"/>,narrow:true},
+              {label:"Base hrs",  el:<input type="number" value={newHrsB}  onChange={e=>setNewHrsB(e.target.value)}  style={inp} placeholder="20"    min="0"/>,narrow:true},
+            ].map(({label,el,narrow})=>(
+              <div key={label} style={{flex:narrow?"0 0 80px":"1",minWidth:narrow?80:100}}>
+                <label style={lbl}>{label}</label>{el}
+              </div>
+            ))}
+            <div style={{flex:"0 0 auto"}}>
+              <label style={lbl}>&nbsp;</label>
+              <button onClick={addStaff} style={{padding:"8px 16px",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>+ Add Staff</button>
+            </div>
+          </div>
+
+          {/* Totals Bar */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:1,background:BR,border:"1px solid "+BR,marginTop:16}}>
+            {[
+              {label:"Total Hours",     value:tHrs+"hrs",         sub:staff.length+" staff",           color:TX},
+              {label:"Total Wages",     value:fmtD(tCost),        sub:"Tier "+(tier||"B")+" hours",    color:TX},
+              {label:"Wages % Net Rev", value:wPct!==null?wPct.toFixed(1)+"%":"—", sub:"benchmark: 8–15%", color:wPct===null?TX:wPct<=13?GR:wPct<=15?YL:RD},
+              {label:"Wages + Ad Cap",  value:adCap>0?fmt(tCost+adCap):fmtD(tCost), sub:adCap>0?"wages "+fmtD(tCost)+" + ads "+fmt(adCap):"enter revenue for full calc", color:TX},
+            ].map(({label,value,sub,color})=>(
+              <div key={label} style={{background:S,padding:"12px 14px"}}>
+                <div style={{fontFamily:ff,fontSize:9,color:MU,letterSpacing:0.8,textTransform:"uppercase",marginBottom:3}}>{label}</div>
+                <div style={{fontFamily:ff,fontSize:20,fontWeight:"bold",color}}>{value}</div>
+                <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2,lineHeight:1.4}}>{sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Notes */}
+          {notes.length>0&&(
+            <div style={{marginTop:14,padding:"12px 14px",background:S2,borderLeft:"3px solid "+A,fontFamily:ff,fontSize:12,color:MU,lineHeight:1.9}}
+              dangerouslySetInnerHTML={{__html:notes.join('<br>')}}/>
+          )}
+
+          {/* Actions */}
+          <div style={{display:"flex",gap:10,marginTop:16,alignItems:"center",flexWrap:"wrap"}}>
+            <button onClick={()=>{
+              const t2=tier;const ac=adCap;
+              let lines=[`ROSTER — ${weekDate}`,"Tier: "+(t2||"—")+"  |  Ad spend cap: "+(ac?fmt(ac):"—")+"  |  Daily: "+(ac?fmt(ac/7):"—"),"","STAFF HOURS:"];
+              staffCalc.forEach(s=>{lines.push(`  ${s.name.padEnd(8)} ${String(s.final).padStart(3)} hrs  ${fmtD(s.cost)}  [${s.depts.map(d=>DEPT_LABELS[d]).join("+")}]`);});
+              lines.push("","Total wages: "+fmtD(tCost)+"  ("+(wPct!==null?wPct.toFixed(1)+"%":"—")+" of est. net rev)");
+              if(ac>0){lines.push("Ad spend cap: "+fmt(ac)+"  (ROAS floor: "+t.roas+")");lines.push("Combined wages + ads: "+fmt(tCost+ac));}
+              if(tasks.filter(x=>x.name).length>0){lines.push("","SPECIAL TASKS:");tasks.filter(x=>x.name).forEach(x=>{lines.push(`  ${x.name}: ${x.hrs} hrs (${DEPT_LABELS[x.dept1]}${x.dept2?" + "+DEPT_LABELS[x.dept2]:""})`);});}
+              navigator.clipboard.writeText(lines.join("\n"));
+            }} style={{padding:"9px 16px",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
+              Copy Summary
+            </button>
+            <button onClick={resetOverrides} style={{padding:"9px 16px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
+              Reset Hour Overrides
+            </button>
+            <button onClick={saveToReports} style={{padding:"9px 16px",background:saveDone?GR:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase",transition:"background 0.3s"}}>
+              {saveDone?"✓ Saved!":"Save to Reports"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Inline-editable StaffRow for RosterCalculator ──────────────────────────
+function StaffRow({s,si,DEPT_LABELS,DEPT_COLORS,onNameChange,onRoleChange,onRateChange,onHrChange,onRemove,fmtD,inp,ff,MU,TX,BR,A,RD,S2,radius}){
+  const [editingField,setEditingField]=useState(null);
+  const [val,setVal]=useState("");
+  const startEdit=(field,current)=>{setEditingField(field);setVal(current);};
+  const commit=(field)=>{
+    if(field==='name')onNameChange(val);
+    else if(field==='role')onRoleChange(val);
+    else if(field==='rate')onRateChange(val);
+    setEditingField(null);
+  };
+  const cellStyle={borderBottom:"1px solid "+BR+"44",padding:"7px 8px",fontFamily:ff,fontSize:12,color:TX,verticalAlign:"middle"};
+  const EditableCell=({field,display,numeric})=>(
+    editingField===field
+      ?<td style={cellStyle}><input autoFocus type={numeric?"number":"text"} value={val} onChange={e=>setVal(e.target.value)} onBlur={()=>commit(field)} onKeyDown={e=>{if(e.key==='Enter'||e.key==='Escape')commit(field);}} style={{...inp,width:"100%",fontSize:12,padding:"4px 6px"}}/></td>
+      :<td onClick={()=>startEdit(field,numeric?s[field]:s[field])} style={{...cellStyle,cursor:"pointer",textDecoration:"underline dotted",textDecorationColor:MU}}>{display}</td>
+  );
+  return(
+    <tr style={{background:s.fixed?S2+"44":"transparent"}} onMouseEnter={e=>e.currentTarget.style.background=S2} onMouseLeave={e=>e.currentTarget.style.background=s.fixed?S2+"44":"transparent"}>
+      <EditableCell field="name" display={<span style={{fontWeight:"bold"}}>{s.name}</span>}/>
+      <EditableCell field="role" display={s.role}/>
+      <td style={cellStyle}>
+        <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+          {s.depts.map(d=>(
+            <span key={d} style={{fontSize:10,padding:"2px 6px",border:"1px solid "+(DEPT_COLORS[d]+"44"),color:DEPT_COLORS[d],background:DEPT_COLORS[d]+"11",borderRadius:2}}>{DEPT_LABELS[d]}</span>
+          ))}
+        </div>
+      </td>
+      <EditableCell field="rate" display={fmtD(s.rate)} numeric/>
+      <td style={{...cellStyle,textAlign:"right",color:MU}}>{s.base}</td>
+      <td style={{...cellStyle,textAlign:"right"}}>{s.adj>0?<span style={{fontSize:10,padding:"1px 6px",background:A+"1a",color:A,border:"1px solid "+A+"44",borderRadius:2}}>+{s.adj}</span>:<span style={{color:MU}}>—</span>}</td>
+      <td style={{...cellStyle,textAlign:"right"}}>
+        {s.fixed
+          ?<span style={{color:MU,opacity:0.5}}>{s.final}</span>
+          :<input type="number" value={s.final} min="0" max="168" onChange={e=>onHrChange(e.target.value)} style={{...inp,width:52,textAlign:"center",fontSize:12,padding:"4px 6px"}}/>
+        }
+      </td>
+      <td style={{...cellStyle,textAlign:"right",fontWeight:"bold"}}>
+        <div style={{display:"flex",alignItems:"center",gap:6,justifyContent:"flex-end"}}>
+          {fmtD(s.cost)}
+          {!s.fixed&&<button onClick={onRemove} style={{background:"transparent",border:"1px solid "+BR,color:MU,width:22,height:22,cursor:"pointer",borderRadius:radius,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}
+            onMouseEnter={e=>e.currentTarget.style.borderColor=RD} onMouseLeave={e=>e.currentTarget.style.borderColor=BR}>×</button>}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 // ─── Cog Settings Modal ───────────────────────────────────────────────────────
 function CogSettings({settings,onSettingsChange,theme,onThemeChange,onClose,labels,onLabelsSave}){
   const {BG,S,S2,BR,A,MU,TX,ff,radius}=useTheme();
@@ -3820,6 +4376,7 @@ function App(){
   const [themeRaw,setThemeRaw]=useState(DEFAULT_THEME);
   const [labelsRaw,setLabelsRaw]=useState(DEFAULT_LABELS);
   const [showSettings,setShowSettings]=useState(false);
+  const [showRoster,setShowRoster]=useState(false);
 
   const availableMonths=getAvailableMonths();
   const now=new Date();
@@ -3998,6 +4555,15 @@ function App(){
                     ⚠ {dataWarnings.length} data warning{dataWarnings.length>1?"s":""}
                   </div>
                 )}
+                {/* Roster Calculator button */}
+                <button onClick={()=>setShowRoster(true)}
+                  title="Roster & Ad Spend Calculator"
+                  style={{background:"transparent",border:"1px solid "+BR,borderRadius:radius,padding:"7px 9px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}
+                  onMouseEnter={e=>e.currentTarget.style.borderColor=A} onMouseLeave={e=>e.currentTarget.style.borderColor=BR}>
+                  <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={MU} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="9" x2="9" y2="21"/><line x1="15" y1="9" x2="15" y2="21"/>
+                  </svg>
+                </button>
                 {/* COG button */}
                 <button onClick={()=>setShowSettings(true)}
                   style={{background:"transparent",border:"1px solid "+BR,borderRadius:radius,padding:"7px 9px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}
@@ -4121,10 +4687,26 @@ function App(){
 
           {tab==="reports"&&!loading&&(
             <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+4,padding:"24px 28px"}}>
-              <ReportsPage monthData={monthData} fixed={fixed} onSave={handleSaveMonthData} onExport={handleExport} opexKeys={opexKeys} depts={wageDepts}/>
+              <ReportsPage monthData={monthData} fixed={fixed} onSave={handleSaveMonthData} onExport={handleExport} opexKeys={opexKeys} depts={wageDepts} rosterSaves={settings?.rosterSaves||[]} onDeleteRosterSave={idx=>{const ns={...(settings||{}),rosterSaves:((settings||{}).rosterSaves||[]).filter((_,i)=>i!==idx)};updateSettings(ns);}}/>
             </div>
           )}
         </div>
+
+        {/* Roster Calculator Modal */}
+        {showRoster&&(
+          <ThemeContext.Provider value={theme}>
+            <RosterCalculatorModal
+              onClose={()=>setShowRoster(false)}
+              curWeeks={curWeeks}
+              monthData={monthData}
+              settings={settings}
+              onSaveRosterEntry={(entry)=>{
+                const ns={...(settings||{}),rosterSaves:[...((settings||{}).rosterSaves||[]),entry]};
+                updateSettings(ns);
+              }}
+            />
+          </ThemeContext.Provider>
+        )}
 
         {/* Settings modal (cog) */}
         {showSettings&&(
