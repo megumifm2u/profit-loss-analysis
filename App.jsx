@@ -1178,22 +1178,45 @@ function MetricsGuide({target}){
   );
 }
 
+
+// ─── Inline Editable Label ────────────────────────────────────────────────────
+function InlineLabel({value,onSave,style={},tag="span"}){
+  const {A,BR,TX,ff,radius}=useTheme();
+  const [editing,setEditing]=useState(false);
+  const [val,setVal]=useState(value);
+  const commit=()=>{if(val.trim())onSave(val.trim());setEditing(false);};
+  if(editing)return(
+    <input autoFocus value={val} onChange={e=>setVal(e.target.value)}
+      onBlur={commit} onKeyDown={e=>{if(e.key==="Enter")commit();if(e.key==="Escape"){setVal(value);setEditing(false);}}}
+      style={{background:"transparent",border:"none",borderBottom:"1px solid "+A,color:TX,fontFamily:ff,outline:"none",padding:"0 2px",fontSize:"inherit",fontWeight:"inherit",letterSpacing:"inherit",...style}}/>
+  );
+  return <span onDoubleClick={()=>{setVal(value);setEditing(true);}} title="Double-click to rename" style={{cursor:"text",...style}}>{value}</span>;
+}
+
 // ─── Cost Stack Bar ───────────────────────────────────────────────────────────
-function CostStackBar({product,catEntry,satchelPerOrder,target,ff,MU,TX,BR,A,GR,RD,S,S2,radius}){
+function CostStackBar({product,catEntry,customCosts,satchelPerOrder,target,ff,MU,TX,BR,A,GR,RD,S,S2,radius}){
   const [showDetail,setShowDetail]=useState(false);
   const c=catEntry(product.product);
   const avgRetail=product.units>0?product.gross/product.units:0;
   if(avgRetail<=0)return null;
 
-  // Build cost components in $ per unit
   const cogsUnit=product.avgCogsUnit||0;
   const pickPack=c.pickPack||0;
   const satchel=satchelPerOrder||0;
-  const avgShipping=c.shippingAU*0.7+c.shippingUS*0.2+c.shippingIntl*0.1;
-  const tariff=cogsUnit*(c.tariffPct/100);
-  const totalVarCost=cogsUnit+pickPack+satchel+avgShipping+tariff;
+  const avgShipping=(c.shippingAU||8)*0.7+(c.shippingUS||18)*0.2+(c.shippingIntl||22)*0.1;
+  const tariff=cogsUnit*((c.tariffPct||0)/100);
+
+  // Custom cost fields — each can be $ or %
+  const customTotal=(customCosts||[]).reduce((sum,cf)=>{
+    const v=parseFloat(c["custom_"+cf.id])||0;
+    return sum+(cf.type==="%"?avgRetail*(v/100):v);
+  },0);
+
+  const totalVarCost=cogsUnit+pickPack+satchel+avgShipping+tariff+customTotal;
   const grossProfitUnit=avgRetail-totalVarCost;
   const marginPct=avgRetail>0?(grossProfitUnit/avgRetail)*100:0;
+
+  const COLORS=["#c084fc","#60a5fa","#34d399","#fbbf24","#f87171","#a78bfa","#fb923c","#38bdf8","#4ade80","#facc15"];
 
   const segments=[
     {label:"Manufacturing COGS",value:cogsUnit,color:"#c084fc"},
@@ -1201,6 +1224,11 @@ function CostStackBar({product,catEntry,satchelPerOrder,target,ff,MU,TX,BR,A,GR,
     {label:"Pick & Pack",value:pickPack,color:"#34d399"},
     {label:"Satchel / Packaging",value:satchel,color:"#fbbf24"},
     tariff>0?{label:"US Tariff",value:tariff,color:"#f87171"}:null,
+    ...(customCosts||[]).map((cf,i)=>{
+      const v=parseFloat(c["custom_"+cf.id])||0;
+      const dollar=cf.type==="%"?avgRetail*(v/100):v;
+      return dollar>0?{label:cf.name,value:dollar,color:COLORS[(i+5)%COLORS.length]}:null;
+    }),
     {label:"Gross Profit",value:Math.max(0,grossProfitUnit),color:marginPct>=target?"#6bffb8":"#ff6b6b"},
   ].filter(Boolean);
 
@@ -1210,7 +1238,6 @@ function CostStackBar({product,catEntry,satchelPerOrder,target,ff,MU,TX,BR,A,GR,
 
   return(
     <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+2,marginBottom:10,overflow:"hidden"}}>
-      {/* Header row */}
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:"1px solid "+BR+"33",cursor:"pointer"}} onClick={()=>setShowDetail(d=>!d)}>
         <div style={{flex:1}}>
           <div style={{fontFamily:ff,fontSize:13,color:TX,fontWeight:"500"}}>{product.product}</div>
@@ -1223,19 +1250,14 @@ function CostStackBar({product,catEntry,satchelPerOrder,target,ff,MU,TX,BR,A,GR,
         <span style={{fontFamily:ff,fontSize:14,color:MU}}>{showDetail?"−":"+"}</span>
       </div>
 
-      {/* Stacked bar */}
       <div style={{padding:"14px 16px"}}>
         <div style={{fontFamily:ff,fontSize:8,color:MU,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>Retail price breakdown — per unit avg</div>
-        {/* Bar */}
         <div style={{display:"flex",height:28,borderRadius:3,overflow:"hidden",marginBottom:8}}>
           {segments.map((seg,i)=>{
             const w=totalForBar>0?(seg.value/totalForBar)*100:0;
-            return w>0?(
-              <div key={i} title={seg.label+": "+fmt2(seg.value)+" ("+pct2(seg.value)+")"} style={{width:w+"%",background:seg.color,transition:"width 0.4s",position:"relative",cursor:"default"}}/>
-            ):null;
+            return w>0?<div key={i} title={seg.label+": "+fmt2(seg.value)+" ("+pct2(seg.value)+")"} style={{width:w+"%",background:seg.color}}/>:null;
           })}
         </div>
-        {/* Legend */}
         <div style={{display:"flex",flexWrap:"wrap",gap:"6px 16px"}}>
           {segments.map((seg,i)=>(
             <div key={i} style={{display:"flex",alignItems:"center",gap:5}}>
@@ -1246,18 +1268,13 @@ function CostStackBar({product,catEntry,satchelPerOrder,target,ff,MU,TX,BR,A,GR,
             </div>
           ))}
         </div>
-
-        {/* Target line indicator */}
         <div style={{marginTop:10,display:"flex",alignItems:"center",gap:8}}>
           <div style={{flex:1,height:1,background:BR}}/>
-          <div style={{fontFamily:ff,fontSize:9,color:MU,whiteSpace:"nowrap"}}>
-            target margin: {target}% → profit floor {fmt2(avgRetail*(target/100))} / unit
-          </div>
+          <div style={{fontFamily:ff,fontSize:9,color:MU,whiteSpace:"nowrap"}}>target {target}% → floor {fmt2(avgRetail*(target/100))} / unit</div>
           <div style={{flex:1,height:1,background:BR}}/>
         </div>
       </div>
 
-      {/* Expanded detail */}
       {showDetail&&(
         <div style={{padding:"0 16px 16px",borderTop:"1px solid "+BR+"33"}}>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8,marginTop:12}}>
@@ -1275,10 +1292,9 @@ function CostStackBar({product,catEntry,satchelPerOrder,target,ff,MU,TX,BR,A,GR,
               </div>
             ))}
           </div>
-          {/* Discount viability row */}
           <div style={{marginTop:10}}>
             <div style={{fontFamily:ff,fontSize:8,color:MU,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>Discount viability</div>
-            <div style={{display:"flex",gap:6}}>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
               {[10,15,20,25].map(d=>{
                 const dp=avgRetail*(1-d/100);
                 const m=dp>0?((dp-totalVarCost)/dp)*100:0;
@@ -1305,7 +1321,6 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
   const [msg,setMsg]=useState("");
   const [open,setOpen]=useState(!!fullPage);
   const [showPaste,setShowPaste]=useState(false);
-  const [editCat,setEditCat]=useState(null);
   const [sortCol,setSortCol]=useState("netSales");
   const [sortDir,setSortDir]=useState("desc");
   const [filters,setFilters]=useState({});
@@ -1318,12 +1333,44 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
   const [dragOver,setDragOver]=useState(null);
   const [activeTab,setActiveTab]=useState("visual");
   const [expandedProduct,setExpandedProduct]=useState(null);
+  const [newCostName,setNewCostName]=useState("");
+  const [newCostType,setNewCostType]=useState("$");
+
   const target=targetMargin||55;
   const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
   const pct=v=>v.toFixed(1)+"%";
   const list=products||[];
   const cat=catalogue||{};
   const satchelPerOrder=parseFloat(satchelCost)||0.85;
+
+  // ── Persisted UI labels (tab names, button names) stored in catalogue.__ui__
+  const ui=cat.__ui__||{};
+  const saveUI=(key,val)=>onCatalogueUpdate({...cat,__ui__:{...ui,[key]:val}});
+  const tabNames={
+    visual: ui.tab_visual||"Cost Breakdown",
+    catalogue: ui.tab_catalogue||"Cost Inputs",
+    analysis: ui.tab_analysis||"Data Table",
+    guide: ui.tab_guide||"Metrics Guide",
+  };
+  const btnNames={
+    csv_main: ui.btn_csv_main||"Download CSV",
+    csv_sub:  ui.btn_csv_sub||"current view, filtered & sorted",
+    copy_main:ui.btn_copy_main||"Copy for Claude",
+    copy_sub: ui.btn_copy_sub||"full analysis + prompt",
+  };
+
+  // ── Custom cost fields stored in catalogue.__customCosts__
+  const customCosts=cat.__customCosts__||[];
+  const saveCustomCosts=arr=>onCatalogueUpdate({...cat,__customCosts__:arr});
+  const addCustomCost=()=>{
+    if(!newCostName.trim())return;
+    const id="cc_"+Date.now();
+    saveCustomCosts([...customCosts,{id,name:newCostName.trim(),type:newCostType}]);
+    setNewCostName(""); setNewCostType("$");
+  };
+  const removeCustomCost=id=>saveCustomCosts(customCosts.filter(c=>c.id!==id));
+  const renameCustomCost=(id,name)=>saveCustomCosts(customCosts.map(c=>c.id===id?{...c,name}:c));
+  const retypeCustomCost=(id,type)=>saveCustomCosts(customCosts.map(c=>c.id===id?{...c,type}:c));
 
   const DEFAULT_COLS=[
     {id:"product",label:"Product",width:180,sortable:true,filterable:true},
@@ -1361,10 +1408,15 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
     const c=catEntry(p.product);
     const avgRetail=p.units>0?p.gross/p.units:0;
     const cogsUnit=p.avgCogsUnit||0;
-    const avgShipping=c.shippingAU*0.7+c.shippingUS*0.2+c.shippingIntl*0.1;
-    const varCostUnit=cogsUnit+c.pickPack+satchelPerOrder+avgShipping+(cogsUnit*(c.tariffPct/100));
+    const avgShipping=(c.shippingAU||8)*0.7+(c.shippingUS||18)*0.2+(c.shippingIntl||22)*0.1;
+    const tariff=cogsUnit*((c.tariffPct||0)/100);
+    const customTotal=(customCosts||[]).reduce((sum,cf)=>{
+      const v=parseFloat(c["custom_"+cf.id])||0;
+      return sum+(cf.type==="%"?avgRetail*(v/100):v);
+    },0);
+    const varCostUnit=cogsUnit+(c.pickPack||0)+satchelPerOrder+avgShipping+tariff+customTotal;
     const contribMargin=avgRetail>0?((avgRetail-varCostUnit)/avgRetail)*100:0;
-    const productTarget=c.targetMarginPct;
+    const productTarget=c.targetMarginPct||target;
     const breakEven=varCostUnit>0&&productTarget<100?varCostUnit/(1-(productTarget/100)):0;
     const modelledMargin=avgRetail>0?((avgRetail-varCostUnit)/avgRetail)*100:0;
     const actualMargin=p.marginPct;
@@ -1381,7 +1433,7 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
     const r=calcProduct(p);
     const st=p.netSales<=0&&p.gross>0?"GIFTED":p.marginPct<r.productTarget?"LOW":"OK";
     return{...p,...r,status:st};
-  }),[list,cat,target,satchelPerOrder]);
+  }),[list,cat,target,satchelPerOrder,customCosts]);
 
   const filtered=useMemo(()=>{
     let rows=[...enriched];
@@ -1409,56 +1461,89 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
   const lowCount=enriched.filter(p=>p.status==="LOW").length;
   const giftedCount=enriched.filter(p=>p.status==="GIFTED").length;
 
-  // Auto-analysis text
+  // ── Rich analysis
   const buildAnalysis=()=>{
     if(!enriched.length)return[];
     const lines=[];
-    // Blended margin health
     const gap=blended-target;
-    if(gap>=5)lines.push({type:"ok",text:`Blended margin is ${blended.toFixed(1)}% — ${gap.toFixed(1)}pp above your ${target}% target. Portfolio is healthy overall.`});
-    else if(gap>=0)lines.push({type:"warn",text:`Blended margin is ${blended.toFixed(1)}% — only ${gap.toFixed(1)}pp above your ${target}% target. Thin buffer. One bad week of discounting could push you below.`});
-    else lines.push({type:"alert",text:`Blended margin is ${blended.toFixed(1)}% — ${Math.abs(gap).toFixed(1)}pp BELOW your ${target}% target. The product mix as a whole is not profitable enough.`});
-    // Below-target products
+
+    // 1. Blended margin health
+    if(gap>=5) lines.push({type:"ok",text:`Blended margin is ${blended.toFixed(1)}% — ${gap.toFixed(1)}pp above your ${target}% target. Portfolio is structurally healthy.`});
+    else if(gap>=0) lines.push({type:"warn",text:`Blended margin is ${blended.toFixed(1)}% — only ${gap.toFixed(1)}pp above your ${target}% target. Thin buffer; one bad week of discounting will push you below.`});
+    else lines.push({type:"alert",text:`Blended margin is ${blended.toFixed(1)}% — ${Math.abs(gap).toFixed(1)}pp BELOW your ${target}% target. The product mix as a whole is not profitable enough to sustain operations.`});
+
+    // 2. Products that cannot survive any discount
+    const cannotDiscount=enriched.filter(p=>p.avgRetail>0&&p.netSales>0&&!p.discLevels?.some(d=>d.viable));
+    if(cannotDiscount.length) lines.push({type:"alert",text:`${cannotDiscount.length} product${cannotDiscount.length>1?"s":""}  cannot support any discount at any level without going below target: ${cannotDiscount.map(p=>p.product).join(", ")}. Remove these from all promotions immediately.`});
+
+    // 3. Below target
     const belowTarget=enriched.filter(p=>p.status==="LOW").sort((a,b)=>a.actualMargin-b.actualMargin);
     if(belowTarget.length){
       const worst=belowTarget[0];
-      lines.push({type:"alert",text:`${belowTarget.length} product${belowTarget.length>1?"s are":" is"} below your ${target}% target. Worst: ${worst.product} at ${worst.actualMargin.toFixed(1)}%. This product costs you money on every discounted sale.`});
+      const dollarGap=worst.netSales>0?Math.abs((worst.actualMargin-worst.productTarget)/100*worst.netSales):0;
+      lines.push({type:"alert",text:`${belowTarget.length} product${belowTarget.length>1?"s are":" is"} below your target. Worst: ${worst.product} at ${worst.actualMargin.toFixed(1)}% — approx ${fmt(dollarGap)} in under-recovered margin this period.`});
     }
-    // Gifted products
+
+    // 4. Gifted products
     if(giftedCount>0){
       const gifted=enriched.filter(p=>p.status==="GIFTED");
       const lostCogs=gifted.reduce((s,p)=>s+p.totalCogs,0);
       lines.push({type:"alert",text:`${giftedCount} product${giftedCount>1?"s were":"was"} fully gifted — ${fmt(lostCogs)} in unrecovered manufacturing costs. Confirm these are intentional PR investments, not errors.`});
     }
-    // Modelled vs actual structural issues
-    const structurallyBroken=enriched.filter(p=>p.modelledMargin<target&&p.avgRetail>0);
-    if(structurallyBroken.length){
-      lines.push({type:"alert",text:`${structurallyBroken.length} product${structurallyBroken.length>1?"s are":" is"} unprofitable at full price before any discounts: ${structurallyBroken.map(p=>p.product).slice(0,3).join(", ")}${structurallyBroken.length>3?" + more":""}. These need a price increase or cost reduction before any promotion runs.`});
-    }
-    // Heavy discounting
+
+    // 5. Structurally broken (unprofitable at full price)
+    const structurallyBroken=enriched.filter(p=>p.modelledMargin<target&&p.avgRetail>0&&p.netSales>0);
+    if(structurallyBroken.length) lines.push({type:"alert",text:`${structurallyBroken.length} product${structurallyBroken.length>1?"s are":" is"} unprofitable at full price before any discounts: ${structurallyBroken.map(p=>p.product).slice(0,3).join(", ")}${structurallyBroken.length>3?` + ${structurallyBroken.length-3} more`:""}. Raise retail price or cut costs before running any promotion.`});
+
+    // 6. Heavy discounting + dollar impact
     const heavilyDisc=enriched.filter(p=>p.discRate>20&&p.netSales>0).sort((a,b)=>b.discRate-a.discRate);
     if(heavilyDisc.length){
-      lines.push({type:"warn",text:`${heavilyDisc.length} product${heavilyDisc.length>1?"s are":" is"} being discounted heavily (over 20% of gross). ${heavilyDisc[0].product} is worst at ${heavilyDisc[0].discRate.toFixed(1)}%. Heavy discounting trains customers not to pay full price.`});
+      const totalDiscDollars=heavilyDisc.reduce((s,p)=>s+p.discounts,0);
+      lines.push({type:"warn",text:`${heavilyDisc.length} product${heavilyDisc.length>1?"s are":" is"} being discounted heavily (over 20%). ${heavilyDisc[0].product} is worst at ${heavilyDisc[0].discRate.toFixed(1)}%. Combined ${fmt(totalDiscDollars)} given away across these products this period.`});
     }
-    // Variance issues
-    const highVar=enriched.filter(p=>p.variance<-5&&p.avgRetail>0);
-    if(highVar.length){
-      lines.push({type:"warn",text:`${highVar.length} product${highVar.length>1?"s have":" has"} actual margin more than 5pp below the model: ${highVar.map(p=>p.product+" ("+p.variance.toFixed(1)+"pp)").slice(0,3).join(", ")}. Check discount codes and return rates for these products.`});
+
+    // 7. Variance (actual vs model gap)
+    const highVar=enriched.filter(p=>p.variance<-5&&p.avgRetail>0&&p.netSales>0);
+    if(highVar.length) lines.push({type:"warn",text:`${highVar.length} product${highVar.length>1?"s have":" has"} actual margin more than 5pp below the model: ${highVar.map(p=>p.product+" ("+p.variance.toFixed(1)+"pp)").slice(0,3).join(", ")}. Check discount codes and return rates — the gap means real-world selling conditions are worse than your cost model predicts.`});
+
+    // 8. Pricing headroom — products with most room before break-even
+    const withHeadroom=enriched.filter(p=>p.avgRetail>0&&p.breakEven>0&&p.netSales>0).sort((a,b)=>(b.avgRetail-b.breakEven)-(a.avgRetail-a.breakEven));
+    if(withHeadroom.length>=2){
+      const best=withHeadroom[0];
+      const headroom=best.avgRetail-best.breakEven;
+      lines.push({type:"ok",text:`Most pricing headroom: ${best.product} has ${fmt(headroom)} between current retail (${fmt(best.avgRetail)}) and break-even (${fmt(best.breakEven)}). Safest product to run a promotion on.`});
     }
-    // Top performer
+
+    // 9. Worst contribution margin (excluding gifted)
+    const byContrib=enriched.filter(p=>p.netSales>0&&p.avgRetail>0).sort((a,b)=>a.contribMargin-b.contribMargin);
+    if(byContrib.length&&byContrib[0].contribMargin<target){
+      const worst=byContrib[0];
+      lines.push({type:"warn",text:`Lowest contribution margin: ${worst.product} at ${worst.contribMargin.toFixed(1)}%. After all variable costs, this product barely covers fixed costs. Every unit sold contributes ${fmt((worst.contribMargin/100)*worst.avgRetail)} toward overheads.`});
+    }
+
+    // 10. Best actual margin
     const topPerf=enriched.filter(p=>p.netSales>0).sort((a,b)=>b.actualMargin-a.actualMargin)[0];
-    if(topPerf&&topPerf.actualMargin>=target){
-      lines.push({type:"ok",text:`Best margin: ${topPerf.product} at ${topPerf.actualMargin.toFixed(1)}% actual margin. This is your most efficient product to promote if needed — most headroom before hitting break-even.`});
+    if(topPerf&&topPerf.actualMargin>=target) lines.push({type:"ok",text:`Best actual margin: ${topPerf.product} at ${topPerf.actualMargin.toFixed(1)}%. Most efficient product in the range — prioritise its promotion and inventory.`});
+
+    // 11. Revenue concentration
+    const byRev=enriched.filter(p=>p.netSales>0).sort((a,b)=>b.netSales-a.netSales);
+    if(byRev.length){
+      const top=byRev[0];
+      const share=totalNet>0?(top.netSales/totalNet*100):0;
+      lines.push({type:share>50?"warn":"info",text:`Revenue concentration: ${top.product} drives ${share.toFixed(0)}% of net sales (${fmt(top.netSales)}). ${share>50?"High dependency on one product — a supply issue or poor week will materially hurt overall performance.":"Revenue is reasonably spread across the range."}`});
     }
-    // Top revenue driver
-    const topRev=enriched.sort((a,b)=>b.netSales-a.netSales)[0];
-    if(topRev){
-      const revShare=(topRev.netSales/totalNet*100).toFixed(0);
-      lines.push({type:"info",text:`Revenue concentration: ${topRev.product} drives ${revShare}% of net sales (${fmt(topRev.netSales)}). ${parseInt(revShare)>50?"Heavy dependency on one product — consider diversifying volume across the range.":"Revenue is reasonably spread across the product range."}`});
+
+    // 12. Return damage (products with notable returns)
+    const withReturns=enriched.filter(p=>p.returns>0&&p.netSales>0).sort((a,b)=>b.returns-a.returns);
+    if(withReturns.length){
+      const totalReturns=withReturns.reduce((s,p)=>s+p.returns,0);
+      const worst=withReturns[0];
+      lines.push({type:"warn",text:`Returns total ${fmt(totalReturns)} across ${withReturns.length} product${withReturns.length>1?"s":""}. ${worst.product} has the highest return value at ${fmt(worst.returns)}. High returns inflate discount rate calculations and suppress actual margin.`});
     }
+
     return lines;
   };
-  const analysis=useMemo(()=>buildAnalysis(),[enriched,target]);
+  const analysis=useMemo(()=>buildAnalysis(),[enriched,target,totalNet]);
 
   function applyPaste(){
     const parsed=parseProductMargin(raw);
@@ -1556,15 +1641,10 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
   function exportText(){
     const fmtN=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
     let t="=== PRODUCT MARGIN ANALYSIS ===\nGenerated: "+new Date().toLocaleDateString("en-AU")+"\n";
-    t+="Products: "+enriched.length+" | Blended GM: "+blended.toFixed(1)+"% | Target: "+target+"% | Satchel cost: "+fmtN(satchelPerOrder)+"\n";
+    t+="Products: "+enriched.length+" | Blended GM: "+blended.toFixed(1)+"% | Target: "+target+"% | Satchel: "+fmtN(satchelPerOrder)+"\n";
     t+="Total Net Sales: "+fmtN(totalNet)+" | Total GP: "+fmtN(totalGP)+"\n\n";
-    const below=enriched.filter(p=>p.status==="LOW");
-    const gifted=enriched.filter(p=>p.status==="GIFTED");
-    if(gifted.length){t+="--- FULLY GIFTED ---\n";gifted.forEach(p=>{t+="  "+p.product+": "+p.units+"u | Gross "+fmtN(p.gross)+" | COGS unrecovered "+fmtN(p.totalCogs)+"\n";});t+="\n";}
-    if(below.length){t+="--- BELOW TARGET ("+target+"%) ---\n";below.forEach(p=>{const r=calcProduct(p);t+="  "+p.product+": actual "+p.marginPct.toFixed(1)+"% | disc rate "+p.discRate.toFixed(1)+"% | break-even "+fmtN(r.breakEven)+"\n    Discount viability: "+r.discLevels.map(d=>"@"+d.disc+"% → "+d.margin.toFixed(1)+"%"+(d.viable?" OK":" NO")).join(" | ")+"\n";});t+="\n";}
-    t+="--- ALL PRODUCTS ---\n";
     sorted.forEach(p=>{const r=calcProduct(p);t+="  "+p.product+" ["+p.status+"]: "+p.units+"u | Net "+fmtN(p.netSales)+" | Actual GM "+p.marginPct.toFixed(1)+"% | Model "+r.modelledMargin.toFixed(1)+"% | Var "+((r.variance>=0?"+":"")+r.variance.toFixed(1))+"%\n    Var cost: "+fmtN(r.varCostUnit)+" | Break-even: "+fmtN(r.breakEven)+" | "+r.discLevels.map(d=>"@"+d.disc+"%→"+d.margin.toFixed(1)+"%").join(" ")+"\n";});
-    t+="\n=== END MARGIN DATA ===\n\nYou are a senior pricing strategist. Analyse this product margin data:\n1. MARGIN HEALTH — Which products are structurally profitable vs marginal vs loss-making?\n2. DISCOUNT DAMAGE — At what discount level does margin become unviable per product?\n3. GIFTED PRODUCTS — Total unrecovered COGS. Marketing investment or mistake?\n4. PRICING RECOMMENDATIONS — Which products need a price increase? By how much exactly?\n5. VARIANCE ANALYSIS — Where actual vs modelled > 5%, diagnose why.\n6. TOP 3 ACTIONS — Exact dollar impact, mechanism, timeline.\n\nUse exact figures. Be specific. Make it actionable.";
+    t+="\n=== END ===\n\nYou are a senior pricing strategist. Analyse this margin data:\n1. MARGIN HEALTH — Structurally profitable vs marginal vs loss-making?\n2. DISCOUNT DAMAGE — At what level does margin become unviable per product?\n3. GIFTED PRODUCTS — Total unrecovered COGS. Intentional or error?\n4. PRICING RECOMMENDATIONS — Which products need a price increase, and by how much?\n5. VARIANCE ANALYSIS — Where actual vs modelled >5pp, diagnose why.\n6. TOP 3 ACTIONS — Exact dollar impact, mechanism, timeline.\nUse exact figures. Be specific. Make it actionable.";
     navigator.clipboard.writeText(t);
     setMsg("Copied — paste into Claude");
     setTimeout(()=>setMsg(""),4000);
@@ -1576,8 +1656,7 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
 
   const StatusBadge=({status})=>{
     const col=status==="OK"?GR:status==="GIFTED"?RD:YL;
-    const bg=status==="OK"?GR+"18":status==="GIFTED"?RD+"18":YL+"18";
-    return <span style={{fontFamily:ff,fontSize:9,color:col,background:bg,padding:"2px 7px",borderRadius:10,fontWeight:"bold",letterSpacing:0.5}}>{status}</span>;
+    return <span style={{fontFamily:ff,fontSize:9,color:col,background:col+"18",padding:"2px 7px",borderRadius:10,fontWeight:"bold",letterSpacing:0.5}}>{status}</span>;
   };
 
   if(!fullPage&&!open) return(
@@ -1599,17 +1678,17 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
         </div>
       )}
 
-      {/* Tab nav */}
+      {/* ── Tab nav with editable names ── */}
       <div style={{display:"flex",borderBottom:"1px solid "+BR,background:S2}}>
         {[
-          {id:"visual",label:"Cost Breakdown"},
-          {id:"catalogue",label:"Cost Inputs"},
-          {id:"analysis",label:"Data Table"},
-          {id:"guide",label:"Metrics Guide"},
+          {id:"visual",key:"tab_visual"},
+          {id:"catalogue",key:"tab_catalogue"},
+          {id:"analysis",key:"tab_analysis"},
+          {id:"guide",key:"tab_guide"},
         ].map(t=>(
           <button key={t.id} onClick={()=>setActiveTab(t.id)}
             style={{padding:"10px 16px",background:"transparent",border:"none",borderBottom:activeTab===t.id?"2px solid "+A:"2px solid transparent",color:activeTab===t.id?A:MU,fontFamily:ff,fontSize:11,cursor:"pointer",letterSpacing:0.5,marginBottom:-1,whiteSpace:"nowrap"}}>
-            {t.label}
+            <InlineLabel value={tabNames[t.id]} onSave={v=>saveUI(t.key,v)} style={{color:activeTab===t.id?A:MU,fontFamily:ff,fontSize:11,letterSpacing:0.5}}/>
           </button>
         ))}
         <div style={{flex:1}}/>
@@ -1619,12 +1698,10 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
         </button>
       </div>
 
-      {/* Paste panel */}
+      {/* ── Paste panel ── */}
       {showPaste&&(
         <div style={{padding:"14px 20px",background:S,borderBottom:"1px solid "+BR}}>
-          <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:8}}>
-            Paste your Shopify product margin report below (tab-separated). New data merges with existing.
-          </div>
+          <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:8}}>Paste your Shopify product margin report below (tab-separated). New data merges with existing.</div>
           <textarea value={raw} onChange={e=>setRaw(e.target.value)}
             placeholder={"Product\tVariant\tUnits Sold\tGross Sales\tDiscounts\tReturns\tNet Sales\tCOGS/Unit\tTotal COGS\tGross Profit\tMargin %"}
             rows={5} style={{...inp,fontFamily:"monospace",fontSize:11,resize:"vertical"}}/>
@@ -1637,7 +1714,7 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
         </div>
       )}
 
-      {/* ── TAB: COST BREAKDOWN (Visual) ── */}
+      {/* ── TAB: COST BREAKDOWN ── */}
       {activeTab==="visual"&&(
         <div style={{padding:"20px"}}>
           {list.length===0?(
@@ -1666,7 +1743,7 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                 ))}
               </div>
 
-              {/* Auto-analysis */}
+              {/* Analysis */}
               {analysis.length>0&&(
                 <div style={{marginBottom:24}}>
                   <div style={{fontFamily:ff,fontSize:9,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:10}}>Analysis</div>
@@ -1684,13 +1761,13 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                 </div>
               )}
 
-              {/* Cost breakdown bars — sorted by net sales */}
+              {/* Cost breakdown bars */}
               <div style={{fontFamily:ff,fontSize:9,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:12}}>Per-Product Cost Breakdown</div>
               <div style={{fontFamily:ff,fontSize:10,color:MU,marginBottom:16,lineHeight:1.6}}>
-                Each bar shows how the average retail price is divided across cost categories and gross profit. Click any product to expand discount viability.
+                Each bar shows how the average retail price divides across costs and gross profit. Click any product to expand discount viability detail.
               </div>
               {enriched.slice().sort((a,b)=>b.netSales-a.netSales).map((p,i)=>(
-                <CostStackBar key={i} product={p} catEntry={catEntry} satchelPerOrder={satchelPerOrder} target={p.productTarget||target}
+                <CostStackBar key={i} product={p} catEntry={catEntry} customCosts={customCosts} satchelPerOrder={satchelPerOrder} target={p.productTarget||target}
                   ff={ff} MU={MU} TX={TX} BR={BR} A={A} GR={GR} RD={RD} S={S} S2={S2} radius={radius}/>
               ))}
             </div>
@@ -1701,34 +1778,75 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
       {/* ── TAB: COST INPUTS ── */}
       {activeTab==="catalogue"&&(
         <div style={{padding:"20px"}}>
-          <div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:20,lineHeight:1.7,background:S,border:"1px solid "+BR+"44",borderRadius:radius,padding:"14px 18px"}}>
+          <div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:16,lineHeight:1.7,background:S,border:"1px solid "+BR+"44",borderRadius:radius,padding:"14px 18px"}}>
             <strong style={{color:TX,fontSize:13}}>Cost inputs — set once, used in every calculation.</strong>
-            <br/>These numbers feed contribution margin, break-even price, and discount safety calculations.
-            <br/><span style={{color:A}}>Satchel cost is auto-filled from your Fixed Costs section ({fmt(satchelPerOrder)} per order).</span>
-            {" "}<span style={{color:MU}}>All other fields are editable inline.</span>
+            <br/>These feed contribution margin, break-even price, and discount safety.
+            <br/><span style={{color:A}}>Satchel cost is auto-filled from Fixed Costs ({fmt(satchelPerOrder)}/order).</span>
+            {" "}<span style={{color:MU}}>Double-click any field header to rename.</span>
           </div>
-          {list.length===0?(
-            <div style={{fontFamily:ff,fontSize:12,color:MU,textAlign:"center",padding:"30px"}}>
-              Load product data first using the "Add Shopify Data" button above.
+
+          {/* Custom cost fields manager */}
+          <div style={{marginBottom:20,background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"14px 16px"}}>
+            <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase",marginBottom:10}}>Custom Cost Fields</div>
+            {customCosts.length>0&&(
+              <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+                {customCosts.map(cf=>(
+                  <div key={cf.id} style={{display:"flex",alignItems:"center",gap:8}}>
+                    <InlineLabel value={cf.name} onSave={v=>renameCustomCost(cf.id,v)} style={{fontFamily:ff,fontSize:11,color:TX,flex:1}}/>
+                    <select value={cf.type} onChange={e=>retypeCustomCost(cf.id,e.target.value)}
+                      style={{...inp,width:60,padding:"3px 6px",fontSize:11}}>
+                      <option value="$">$ (fixed)</option>
+                      <option value="%">% of retail</option>
+                    </select>
+                    <button onClick={()=>removeCustomCost(cf.id)}
+                      style={{background:"transparent",border:"1px solid "+RD+"44",color:RD,padding:"3px 8px",fontFamily:ff,fontSize:10,cursor:"pointer",borderRadius:radius}}>
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <input value={newCostName} onChange={e=>setNewCostName(e.target.value)}
+                placeholder="e.g. Payment gateway fee, Marketing allocation…"
+                onKeyDown={e=>e.key==="Enter"&&addCustomCost()}
+                style={{...inp,flex:1,fontSize:11}}/>
+              <select value={newCostType} onChange={e=>setNewCostType(e.target.value)}
+                style={{...inp,width:100,fontSize:11}}>
+                <option value="$">$ fixed</option>
+                <option value="%">% of retail</option>
+              </select>
+              <button onClick={addCustomCost}
+                style={{padding:"5px 14px",background:A,border:"none",color:"#fff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,whiteSpace:"nowrap"}}>
+                Add Field
+              </button>
             </div>
+          </div>
+
+          {list.length===0?(
+            <div style={{fontFamily:ff,fontSize:12,color:MU,textAlign:"center",padding:"30px"}}>Load product data first using the "Add Shopify Data" button above.</div>
           ):(
             <div style={{overflowX:"auto"}}>
               <table style={{borderCollapse:"collapse",fontFamily:ff,fontSize:11,width:"100%"}}>
                 <thead>
                   <tr style={{borderBottom:"2px solid "+BR}}>
                     {[
-                      {h:"Product",hint:""},
-                      {h:"Pick & Pack ($)",hint:"Labour cost + packing materials per order. E.g. $3.50"},
-                      {h:"Satchel Cost",hint:"Auto-pulled from Fixed Costs. Change it there to update everywhere."},
-                      {h:"US Tariff %",hint:"Import duty applied to US orders. 0% for AU/domestic. E.g. 10 for 10%."},
-                      {h:"Target GM %",hint:"Minimum acceptable gross margin for this product. E.g. 55 for 55%."},
-                      {h:"Ship AU ($)",hint:"Average outbound shipping cost for Australian orders."},
-                      {h:"Ship US ($)",hint:"Average outbound shipping cost for US orders."},
-                      {h:"Ship Intl ($)",hint:"Average outbound shipping cost for all other international orders."},
-                    ].map(({h,hint})=>(
-                      <th key={h} title={hint} style={{...thStyle,textAlign:h==="Product"?"left":"center",borderBottom:"2px solid "+BR,cursor:hint?"help":"default"}}>
-                        <div>{h}</div>
-                        {hint&&<div style={{fontSize:7,color:MU,fontWeight:"normal",marginTop:1,letterSpacing:0,textTransform:"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:100}}>{hint.split(".")[0]}</div>}
+                      {key:"_product",label:"Product",hint:""},
+                      {key:"pickPack",label:"Pick & Pack ($)",hint:"Labour + packing materials per order"},
+                      {key:"_satchel",label:"Satchel",hint:"From Fixed Costs"},
+                      {key:"tariffPct",label:"US Tariff %",hint:"Import duty for US orders. 0 for AU."},
+                      {key:"targetMarginPct",label:"Target GM %",hint:"Minimum acceptable margin for this product"},
+                      {key:"shippingAU",label:"Ship AU ($)",hint:"Avg AU shipping cost"},
+                      {key:"shippingUS",label:"Ship US ($)",hint:"Avg US shipping cost"},
+                      {key:"shippingIntl",label:"Ship Intl ($)",hint:"Avg international shipping cost"},
+                      ...customCosts.map(cf=>({key:"custom_"+cf.id,label:cf.name+" ("+cf.type+")",hint:cf.type==="%"?"% of avg retail price":"Fixed $ per unit"})),
+                    ].map(({key,label,hint})=>(
+                      <th key={key} title={hint} style={{...thStyle,textAlign:key==="_product"?"left":"center",cursor:hint?"help":"default"}}>
+                        {key.startsWith("custom_")
+                          ?<InlineLabel value={label} onSave={v=>renameCustomCost(key.slice(7),v.replace(" ("+customCosts.find(c=>"custom_"+c.id===key)?.type+")",""))} style={{fontFamily:ff,fontSize:8,color:MU}}/>
+                          :label
+                        }
+                        {hint&&<div style={{fontSize:7,color:MU,fontWeight:"normal",marginTop:1,letterSpacing:0,textTransform:"none"}}>{hint.split(".")[0]}</div>}
                       </th>
                     ))}
                   </tr>
@@ -1736,16 +1854,11 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                 <tbody>
                   {list.map((p,i)=>{
                     const c=catEntry(p.product);
-                    const isEdit=editCat===p.product;
                     return(
-                      <tr key={i} style={{borderBottom:"1px solid "+BR+"33",background:isEdit?A+"0d":i%2===0?"transparent":S+"33"}}>
-                        <td style={{...tdStyle,color:TX,maxWidth:200,fontWeight:"500",cursor:"default"}} onClick={()=>setEditCat(isEdit?null:p.product)}>
-                          {p.product}
-                          <div style={{fontFamily:ff,fontSize:8,color:isEdit?A:MU,marginTop:1}}>{isEdit?"− close":"+ expand"}</div>
-                        </td>
+                      <tr key={i} style={{borderBottom:"1px solid "+BR+"33",background:i%2===0?"transparent":S+"33"}}>
+                        <td style={{...tdStyle,color:TX,fontWeight:"500"}}>{p.product}</td>
                         <td style={{padding:"4px 6px"}}>
                           <input type="number" value={c.pickPack} onChange={e=>saveCat(p.product,"pickPack",parseFloat(e.target.value)||0)}
-                            placeholder="0.00"
                             style={{...inp,width:70,textAlign:"right",background:c.pickPack>0?S:RD+"11",border:"1px solid "+(c.pickPack>0?BR:RD+"44")}}/>
                           {c.pickPack===0&&<div style={{fontFamily:ff,fontSize:8,color:RD,marginTop:1}}>not set</div>}
                         </td>
@@ -1755,38 +1868,41 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                         </td>
                         <td style={{padding:"4px 6px"}}>
                           <input type="number" value={c.tariffPct} onChange={e=>saveCat(p.product,"tariffPct",parseFloat(e.target.value)||0)}
-                            placeholder="0"
                             style={{...inp,width:60,textAlign:"right"}}/>
                           <div style={{fontFamily:ff,fontSize:8,color:MU,marginTop:1}}>%</div>
                         </td>
                         <td style={{padding:"4px 6px"}}>
-                          <input type="number" value={c.targetMarginPct} onChange={e=>saveCat(p.product,"targetMarginPct",parseFloat(e.target.value)||0)}
-                            placeholder={target}
+                          <input type="number" value={c.targetMarginPct||target} onChange={e=>saveCat(p.product,"targetMarginPct",parseFloat(e.target.value)||0)}
                             style={{...inp,width:60,textAlign:"right",fontWeight:"bold",color:A,border:"1px solid "+A+"66"}}/>
                           <div style={{fontFamily:ff,fontSize:8,color:MU,marginTop:1}}>%</div>
                         </td>
                         <td style={{padding:"4px 6px"}}>
-                          <input type="number" value={c.shippingAU} onChange={e=>saveCat(p.product,"shippingAU",parseFloat(e.target.value)||0)}
-                            placeholder="8"
+                          <input type="number" value={c.shippingAU||8} onChange={e=>saveCat(p.product,"shippingAU",parseFloat(e.target.value)||0)}
                             style={{...inp,width:60,textAlign:"right"}}/>
                         </td>
                         <td style={{padding:"4px 6px"}}>
-                          <input type="number" value={c.shippingUS} onChange={e=>saveCat(p.product,"shippingUS",parseFloat(e.target.value)||0)}
-                            placeholder="18"
+                          <input type="number" value={c.shippingUS||18} onChange={e=>saveCat(p.product,"shippingUS",parseFloat(e.target.value)||0)}
                             style={{...inp,width:60,textAlign:"right"}}/>
                         </td>
                         <td style={{padding:"4px 6px"}}>
-                          <input type="number" value={c.shippingIntl} onChange={e=>saveCat(p.product,"shippingIntl",parseFloat(e.target.value)||0)}
-                            placeholder="22"
+                          <input type="number" value={c.shippingIntl||22} onChange={e=>saveCat(p.product,"shippingIntl",parseFloat(e.target.value)||0)}
                             style={{...inp,width:60,textAlign:"right"}}/>
                         </td>
+                        {customCosts.map(cf=>(
+                          <td key={cf.id} style={{padding:"4px 6px"}}>
+                            <input type="number" value={c["custom_"+cf.id]||""} onChange={e=>saveCat(p.product,"custom_"+cf.id,parseFloat(e.target.value)||0)}
+                              placeholder={cf.type==="%"?"0.0":"0.00"}
+                              style={{...inp,width:70,textAlign:"right"}}/>
+                            <div style={{fontFamily:ff,fontSize:8,color:MU,marginTop:1}}>{cf.type}</div>
+                          </td>
+                        ))}
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
               <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:10,padding:"8px 4px"}}>
-                Pick &amp; Pack and Shipping fields affect Variable Cost and Contribution Margin. Fill these in accurately to get useful break-even and discount safety calculations.
+                All fields update calculations immediately. Pick &amp; Pack, Shipping, and custom fields affect Variable Cost and Contribution Margin.
               </div>
             </div>
           )}
@@ -1805,28 +1921,23 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
             <div>
               <div style={{padding:"10px 20px",background:S,borderBottom:"1px solid "+BR+"44",display:"flex",gap:16,flexWrap:"wrap",alignItems:"center"}}>
                 <span style={{fontFamily:ff,fontSize:10,color:MU,letterSpacing:1,textTransform:"uppercase"}}>Legend:</span>
-                {[
-                  {color:GR,label:"At or above target margin"},
-                  {color:RD,label:"Below target"},
-                  {color:YL,label:"Heavily discounted (>20%)"},
-                  {color:MU,label:"Neutral / informational"},
-                ].map(({color,label})=>(
+                {[{color:GR,label:"At or above target"},{color:RD,label:"Below target"},{color:YL,label:"Heavy discount (>20%)"},{color:MU,label:"Neutral"}].map(({color,label})=>(
                   <div key={label} style={{display:"flex",alignItems:"center",gap:5}}>
                     <div style={{width:10,height:10,borderRadius:2,background:color,flexShrink:0}}/>
                     <span style={{fontFamily:ff,fontSize:10,color:MU}}>{label}</span>
                   </div>
                 ))}
                 <div style={{flex:1}}/>
-                <span style={{fontFamily:ff,fontSize:9,color:MU,fontStyle:"italic"}}>Hover column headers for explanation · Double-click to rename · Drag to reorder</span>
+                <span style={{fontFamily:ff,fontSize:9,color:MU,fontStyle:"italic"}}>Hover headers for tips · Double-click to rename · Drag to reorder</span>
               </div>
               <div style={{padding:"10px 16px",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",borderBottom:"1px solid "+BR+"44",background:S2}}>
-                <span style={{fontFamily:ff,fontSize:10,color:MU}}>{sorted.length}/{enriched.length} products shown</span>
+                <span style={{fontFamily:ff,fontSize:10,color:MU}}>{sorted.length}/{enriched.length} products</span>
                 <div style={{flex:1}}/>
-                <button onClick={()=>setShowFilters(f=>!f)} style={{padding:"4px 10px",background:showFilters?A+"22":"transparent",border:"1px solid "+(showFilters?A:BR),color:showFilters?A:MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>
+                <button onClick={()=>setShowFilters(f=>!f)} style={{padding:"4px 10px",background:showFilters?A+"22":"transparent",border:"1px solid "+(showFilters?A:BR),color:showFilters?A:MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius}}>
                   {Object.values(filters).some(v=>v)?"Filters ON":"Filters"}
                 </button>
-                {Object.values(filters).some(v=>v)&&<button onClick={()=>setFilters({})} style={{padding:"4px 10px",background:"transparent",border:"1px solid "+BR,color:RD,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius}}>Clear filters</button>}
-                <button onClick={()=>setColOrder(null)} style={{padding:"4px 10px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius}}>Reset columns</button>
+                {Object.values(filters).some(v=>v)&&<button onClick={()=>setFilters({})} style={{padding:"4px 10px",background:"transparent",border:"1px solid "+BR,color:RD,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius}}>Clear</button>}
+                <button onClick={()=>setColOrder(null)} style={{padding:"4px 10px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:9,cursor:"pointer",borderRadius:radius}}>Reset cols</button>
               </div>
               {showFilters&&(
                 <div style={{padding:"8px 16px",display:"flex",gap:6,flexWrap:"wrap",borderBottom:"1px solid "+BR+"44",background:S}}>
@@ -1845,26 +1956,7 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                   <thead>
                     <tr>
                       {activeCols.map(col=>{
-                        const colTips={
-                          product:"Product name from Shopify.",
-                          units:"Total units sold this period.",
-                          gross:"Total gross sales before discounts or returns.",
-                          discRate:"% of gross sales given away as discounts. Above 20% = concern.",
-                          netSales:"Revenue after discounts and returns.",
-                          totalCogs:"Total cost of goods — what you paid to manufacture.",
-                          grossProfit:"Net Sales minus COGS.",
-                          actualMargin:"Real gross margin % achieved.",
-                          modelledMargin:"Theoretical margin at full price using your Cost Inputs.",
-                          variance:"Actual GM minus Modelled GM. Negative = discounts/returns hurt more than expected.",
-                          contribMargin:"After ALL variable costs. What actually covers fixed costs.",
-                          breakEven:"Minimum retail price to hit your target margin.",
-                          varCost:"Total variable cost per unit — COGS + pick&pack + satchel + shipping + tariff.",
-                          disc10:"Margin if you ran a 10% promotion.",
-                          disc15:"Margin if you ran a 15% promotion.",
-                          disc20:"Margin if you ran a 20% promotion.",
-                          disc25:"Margin if you ran a 25% promotion.",
-                          status:"OK = on target. LOW = below target. GIFTED = 100% discounted.",
-                        };
+                        const colTips={product:"Product name.",units:"Units sold.",gross:"Gross sales before discounts.",discRate:"% gross given as discounts. >20% = concern.",netSales:"Revenue after discounts and returns.",totalCogs:"Total manufacturing cost.",grossProfit:"Net sales minus COGS.",actualMargin:"Real gross margin achieved.",modelledMargin:"Theoretical margin at full retail price.",variance:"Actual minus modelled. Negative = discounts/returns worse than model.",contribMargin:"After ALL variable costs. What covers fixed costs.",breakEven:"Minimum retail price to hit target margin.",varCost:"Total variable cost per unit.",disc10:"Margin at 10% off.",disc15:"Margin at 15% off.",disc20:"Margin at 20% off.",disc25:"Margin at 25% off.",status:"OK / LOW / GIFTED"};
                         return(
                           <th key={col.id} draggable onDragStart={e=>onDragStart(e,col.id)} onDragOver={e=>onDragOver(e,col.id)} onDrop={e=>onDrop(e,col.id)}
                             title={colTips[col.id]||""}
@@ -1906,17 +1998,13 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                               const marginVal=col.id==="actualMargin"?row.actualMargin:col.id==="modelledMargin"?row.modelledMargin:row.contribMargin;
                               return(
                                 <td key={col.id} style={{...tdStyle,color:cellColor,textAlign:col.id==="product"?"left":"right",fontWeight:["actualMargin","contribMargin"].includes(col.id)?"bold":"normal",maxWidth:getColWidth(col.id),position:"relative"}}>
-                                  {col.id==="product"?(
-                                    <span>
-                                      <span style={{fontSize:8,color:MU,marginRight:4}}>{row.variants?.length>1?(isExp?"−":"+"):""}</span>
-                                      {getCellVal(row,col.id)}
-                                    </span>
-                                  ):col.id==="status"?<StatusBadge status={row.status}/>:(
+                                  {col.id==="product"?<span><span style={{fontSize:8,color:MU,marginRight:4}}>{isExp?"−":"+"}</span>{getCellVal(row,col.id)}</span>
+                                   :col.id==="status"?<StatusBadge status={row.status}/>:(
                                     <span>
                                       {getCellVal(row,col.id)}
                                       {isMarginCol&&row.netSales>0&&(
                                         <div style={{position:"absolute",bottom:2,left:"8px",right:"8px",height:2,background:BR+"44",borderRadius:1}}>
-                                          <div style={{width:Math.min(100,Math.max(0,marginVal))+"%",height:"100%",background:cellColor,borderRadius:1,transition:"width 0.3s"}}/>
+                                          <div style={{width:Math.min(100,Math.max(0,marginVal))+"%",height:"100%",background:cellColor,borderRadius:1}}/>
                                         </div>
                                       )}
                                     </span>
@@ -1930,25 +2018,24 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                               <td colSpan={activeCols.length} style={{padding:"12px 16px 14px 28px",background:A+"08"}}>
                                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:8,marginBottom:12}}>
                                   {[
-                                    {l:"Avg Retail Price",v:row.avgRetail>0?fmt(row.avgRetail):"—",hint:"Gross sales / units sold"},
-                                    {l:"Variable Cost/unit",v:row.varCostUnit>0?fmt(row.varCostUnit):"—",hint:"COGS + pick&pack + satchel + shipping + tariff"},
+                                    {l:"Avg Retail Price",v:row.avgRetail>0?fmt(row.avgRetail):"—"},
+                                    {l:"Variable Cost/unit",v:row.varCostUnit>0?fmt(row.varCostUnit):"—"},
                                     {l:"Gross Sales",v:fmt(row.gross)},
-                                    {l:"Total Discounts",v:row.discounts>0?("-"+fmt(row.discounts)):"None",c:row.discounts>0?RD:GR},
-                                    {l:"Returns",v:row.returns>0?("-"+fmt(row.returns)):"None",c:row.returns>0?RD:GR},
+                                    {l:"Discounts",v:row.discounts>0?"-"+fmt(row.discounts):"None",c:row.discounts>0?RD:GR},
+                                    {l:"Returns",v:row.returns>0?"-"+fmt(row.returns):"None",c:row.returns>0?RD:GR},
                                     {l:"Net Sales",v:fmt(row.netSales),c:A},
                                     {l:"COGS",v:fmt(row.totalCogs)},
                                     {l:"Gross Profit",v:fmt(row.grossProfit),c:row.grossProfit>=0?GR:RD},
                                     {l:"Actual Margin",v:row.netSales>0?pct(row.actualMargin):"GIFTED",c:row.actualMargin>=(row.productTarget||target)?GR:RD},
-                                    {l:"Modelled Margin",v:row.avgRetail>0?pct(row.modelledMargin):"—",c:row.avgRetail>0?(row.modelledMargin>=(row.productTarget||target)?GR:RD):MU},
+                                    {l:"Modelled Margin",v:row.avgRetail>0?pct(row.modelledMargin):"—",c:row.modelledMargin>=(row.productTarget||target)?GR:RD},
                                     {l:"Variance",v:row.avgRetail>0?((row.variance>=0?"+":"")+row.variance.toFixed(1)+"%"):"—",c:Math.abs(row.variance)>5?RD:MU},
-                                    {l:"Break-even Price",v:row.breakEven>0?fmt(row.breakEven):"—"},
-                                    {l:"Max Safe Discount",v:row.discLevels?.some(d=>d.viable)?("@"+row.discLevels.filter(d=>d.viable).pop()?.disc+"%"):"None",c:row.discLevels?.some(d=>d.viable)?GR:RD},
-                                    {l:"Target GM %",v:(row.productTarget||target)+"%"},
-                                  ].map(({l,v,c,hint})=>(
-                                    <div key={l} title={hint||""} style={{background:S2,borderRadius:radius,padding:"8px 10px"}}>
+                                    {l:"Break-even",v:row.breakEven>0?fmt(row.breakEven):"—"},
+                                    {l:"Max Safe Disc",v:row.discLevels?.some(d=>d.viable)?("@"+row.discLevels.filter(d=>d.viable).pop()?.disc+"%"):"None",c:row.discLevels?.some(d=>d.viable)?GR:RD},
+                                    {l:"Target GM",v:(row.productTarget||target)+"%"},
+                                  ].map(({l,v,c})=>(
+                                    <div key={l} style={{background:S2,borderRadius:radius,padding:"8px 10px"}}>
                                       <div style={{fontFamily:ff,fontSize:8,color:MU,textTransform:"uppercase",letterSpacing:0.5,marginBottom:3}}>{l}</div>
                                       <div style={{fontFamily:ff,fontSize:12,color:c||TX,fontWeight:"bold"}}>{v}</div>
-                                      {hint&&<div style={{fontFamily:ff,fontSize:9,color:MU,marginTop:2,lineHeight:1.4}}>{hint}</div>}
                                     </div>
                                   ))}
                                 </div>
@@ -1962,9 +2049,7 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                                         <div style={{fontFamily:ff,fontSize:8,color:d.viable?GR:RD}}>{d.viable?"Safe":"Too low"}</div>
                                       </div>
                                     ))}
-                                    {!row.discLevels?.some(d=>d.viable)&&(
-                                      <div style={{fontFamily:ff,fontSize:11,color:RD,padding:"6px 0"}}>No safe discount level — this product cannot be promoted without going below your target margin</div>
-                                    )}
+                                    {!row.discLevels?.some(d=>d.viable)&&<div style={{fontFamily:ff,fontSize:11,color:RD}}>No safe discount level</div>}
                                   </div>
                                 </div>
                                 {row.variants?.length>1&&(
@@ -1994,13 +2079,7 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                     <tr style={{borderTop:"2px solid "+BR,background:S2}}>
                       {activeCols.map(col=>(
                         <td key={col.id} style={{...tdStyle,fontWeight:"bold",textAlign:col.id==="product"?"left":"right"}}>
-                          {col.id==="product"?"TOTAL / BLENDED":
-                           col.id==="units"?enriched.reduce((s,p)=>s+p.units,0):
-                           col.id==="gross"?fmt(enriched.reduce((s,p)=>s+p.gross,0)):
-                           col.id==="netSales"?<span style={{color:A}}>{fmt(totalNet)}</span>:
-                           col.id==="totalCogs"?fmt(enriched.reduce((s,p)=>s+p.totalCogs,0)):
-                           col.id==="grossProfit"?<span style={{color:totalGP>=0?GR:RD}}>{fmt(totalGP)}</span>:
-                           col.id==="actualMargin"||col.id==="contribMargin"?<span style={{color:blended>=target?GR:RD}}>{blended.toFixed(1)}%</span>:""}
+                          {col.id==="product"?"TOTAL / BLENDED":col.id==="units"?enriched.reduce((s,p)=>s+p.units,0):col.id==="gross"?fmt(enriched.reduce((s,p)=>s+p.gross,0)):col.id==="netSales"?<span style={{color:A}}>{fmt(totalNet)}</span>:col.id==="totalCogs"?fmt(enriched.reduce((s,p)=>s+p.totalCogs,0)):col.id==="grossProfit"?<span style={{color:totalGP>=0?GR:RD}}>{fmt(totalGP)}</span>:col.id==="actualMargin"||col.id==="contribMargin"?<span style={{color:blended>=target?GR:RD}}>{blended.toFixed(1)}%</span>:""}
                         </td>
                       ))}
                     </tr>
@@ -2008,11 +2087,7 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
                 </table>
               </div>
               <div style={{padding:"8px 20px 12px",fontFamily:ff,fontSize:9,color:MU,display:"flex",gap:16,flexWrap:"wrap"}}>
-                <span>Sort: click column header</span>
-                <span>Rename: double-click header</span>
-                <span>Resize: drag right edge of header</span>
-                <span>Reorder: drag column header</span>
-                <span>Expand: click any product row</span>
+                <span>Sort: click header</span><span>Rename: double-click header</span><span>Resize: drag header edge</span><span>Reorder: drag header</span><span>Expand: click row</span>
               </div>
             </div>
           )}
@@ -2022,18 +2097,26 @@ function ProductMarginImport({products,catalogue,onUpdate,onCatalogueUpdate,targ
       {/* ── TAB: METRICS GUIDE ── */}
       {activeTab==="guide"&&<MetricsGuide target={target}/>}
 
-      {/* Export row */}
+      {/* ── Export row with editable button names ── */}
       {list.length>0&&(
         <div style={{display:"flex",gap:12,padding:"16px 20px",borderTop:"1px solid "+BR+"44",background:S2}}>
           <button onClick={exportCSV}
             style={{flex:1,padding:"13px 0",background:"transparent",border:"1px solid "+BR,color:TX,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,letterSpacing:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-            <span style={{fontWeight:"bold"}}>Download CSV</span>
-            <span style={{fontSize:9,color:MU}}>current view, filtered &amp; sorted</span>
+            <span style={{fontWeight:"bold"}}>
+              <InlineLabel value={btnNames.csv_main} onSave={v=>saveUI("btn_csv_main",v)} style={{color:TX,fontFamily:ff,fontSize:12,fontWeight:"bold",letterSpacing:1}}/>
+            </span>
+            <span style={{fontSize:9,color:MU}}>
+              <InlineLabel value={btnNames.csv_sub} onSave={v=>saveUI("btn_csv_sub",v)} style={{color:MU,fontFamily:ff,fontSize:9}}/>
+            </span>
           </button>
           <button onClick={exportText}
             style={{flex:1,padding:"13px 0",background:A+"11",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,letterSpacing:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-            <span style={{fontWeight:"bold"}}>Copy for Claude</span>
-            <span style={{fontSize:9,color:MU}}>full analysis + prompt</span>
+            <span style={{fontWeight:"bold"}}>
+              <InlineLabel value={btnNames.copy_main} onSave={v=>saveUI("btn_copy_main",v)} style={{color:A,fontFamily:ff,fontSize:12,fontWeight:"bold",letterSpacing:1}}/>
+            </span>
+            <span style={{fontSize:9,color:MU}}>
+              <InlineLabel value={btnNames.copy_sub} onSave={v=>saveUI("btn_copy_sub",v)} style={{color:MU,fontFamily:ff,fontSize:9}}/>
+            </span>
           </button>
           {msg&&<span style={{fontFamily:ff,fontSize:11,color:GR,alignSelf:"center"}}>{msg}</span>}
         </div>
