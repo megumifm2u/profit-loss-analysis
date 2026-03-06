@@ -3397,103 +3397,6 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts,rosterSaves
   const stubLabels={...DEFAULT_LABELS,_save:()=>{}};
   return(
     <div>
-      {/* Roster Calculator Saves */}
-      {(rosterSaves||[]).length>0&&(
-        <div style={{border:"1px solid "+A+"44",borderRadius:radius+2,marginBottom:20,overflow:"visible"}}>
-          <div onClick={()=>setRosterOpen(o=>!o)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",background:rosterOpen?S2:"transparent",borderRadius:rosterOpen?(radius+2)+"px "+(radius+2)+"px 0 0":radius+2+"px",cursor:"pointer"}}>
-            <div>
-              <div style={{fontFamily:ff,fontSize:13,color:A,letterSpacing:1.5,textTransform:"uppercase"}}>Roster Calculator — Saved Plans</div>
-              <div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:2}}>{(rosterSaves||[]).length} saved roster plan{(rosterSaves||[]).length!==1?"s":""}</div>
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={A} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="9" x2="9" y2="21"/><line x1="15" y1="9" x2="15" y2="21"/>
-              </svg>
-              <span style={{fontFamily:ff,fontSize:20,color:MU,lineHeight:1}}>{rosterOpen?"-":"+"}</span>
-            </div>
-          </div>
-          {rosterOpen&&(
-            <div style={{padding:"16px",borderTop:"1px solid "+BR,background:S}}>
-              {(rosterSaves||[]).slice().reverse().map((entry,ri)=>{
-                const idx=(rosterSaves.length-1)-ri;
-                const isOpen=rosterExpanded===idx;
-                return(
-                  <div key={idx} style={{border:"1px solid "+BR,borderRadius:radius+2,marginBottom:8,overflow:"hidden"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 14px",background:isOpen?S2:"transparent",cursor:"pointer"}} onClick={()=>setRosterExpanded(isOpen?null:idx)}>
-                      <div>
-                        <div style={{fontFamily:ff,fontSize:13,color:TX}}>{entry.weekLabel||"Untitled Roster"}</div>
-                        <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>Saved {entry.savedAt||"—"} · Tier {entry.tier||"—"} · {entry.totalStaff||0} staff</div>
-                      </div>
-                      <div style={{display:"flex",alignItems:"center",gap:10}}>
-                        <div style={{textAlign:"right"}}>
-                          <div style={{fontFamily:ff,fontSize:13,color:GR}}>{entry.totalWages||"—"}</div>
-                          <div style={{fontFamily:ff,fontSize:10,color:MU}}>wages + {entry.adCap||"—"} ad cap</div>
-                        </div>
-                        <button onClick={e=>{e.stopPropagation();if(window.confirm("Delete this roster plan?"))onDeleteRosterSave(idx);}}
-                          style={{background:"transparent",border:"1px solid "+BR,color:MU,padding:"3px 8px",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius}}
-                          onMouseEnter={e=>e.currentTarget.style.borderColor=RD} onMouseLeave={e=>e.currentTarget.style.borderColor=BR}>×</button>
-                        <span style={{fontFamily:ff,fontSize:18,color:MU,lineHeight:1}}>{isOpen?"-":"+"}</span>
-                      </div>
-                    </div>
-                    {isOpen&&(
-                      <div style={{padding:"14px 16px",borderTop:"1px solid "+BR,background:S}}>
-                        {/* Revenue context */}
-                        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
-                          {[["Last Week Gross",entry.rev1],["Week Before",entry.rev2],["Forecast",entry.forecast]].map(([l,v])=>(
-                            <div key={l} style={{background:S2,border:"1px solid "+BR,borderRadius:radius,padding:"8px 10px"}}>
-                              <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:2}}>{l}</div>
-                              <div style={{fontFamily:ff,fontSize:13,color:TX}}>{v||"—"}</div>
-                            </div>
-                          ))}
-                        </div>
-                        {/* Tier & ad cap */}
-                        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
-                          {[["Tier",entry.tier],["Ad Spend Cap",entry.adCap],["Total Hours",entry.totalHours],["Wages % Net Rev",entry.wagesPct]].map(([l,v])=>(
-                            <div key={l} style={{background:S2,border:"1px solid "+BR,borderRadius:radius,padding:"8px 10px"}}>
-                              <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:2}}>{l}</div>
-                              <div style={{fontFamily:ff,fontSize:13,color:l==="Tier"?A:TX}}>{v||"—"}</div>
-                            </div>
-                          ))}
-                        </div>
-                        {/* Staff breakdown */}
-                        {entry.staffLines&&entry.staffLines.length>0&&(
-                          <div>
-                            <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Staff</div>
-                            {entry.staffLines.map((s,si)=>(
-                              <div key={si} style={{display:"flex",justifyContent:"space-between",padding:"7px 10px",background:si%2===0?S2:"transparent",borderRadius:radius,marginBottom:2}}>
-                                <div>
-                                  <span style={{fontFamily:ff,fontSize:12,color:TX,marginRight:8}}>{s.name}</span>
-                                  <span style={{fontFamily:ff,fontSize:10,color:MU}}>{s.role} · {s.depts}</span>
-                                </div>
-                                <div style={{textAlign:"right"}}>
-                                  <span style={{fontFamily:ff,fontSize:12,color:TX}}>{s.finalHrs}hrs</span>
-                                  <span style={{fontFamily:ff,fontSize:11,color:MU,marginLeft:8}}>{s.cost}</span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {/* Tasks */}
-                        {entry.taskLines&&entry.taskLines.length>0&&(
-                          <div style={{marginTop:10}}>
-                            <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Special Tasks</div>
-                            {entry.taskLines.map((t,ti)=>(
-                              <div key={ti} style={{fontFamily:ff,fontSize:11,color:MU,padding:"4px 0"}}>{t.name} — {t.hrs}hrs ({t.dept1}{t.dept2?"+"+t.dept2:""})</div>
-                            ))}
-                          </div>
-                        )}
-                        {entry.notes&&(
-                          <div style={{marginTop:10,padding:"10px 12px",background:A+"0f",border:"1px solid "+A+"33",borderRadius:radius,fontFamily:ff,fontSize:11,color:TX,lineHeight:1.7}} dangerouslySetInnerHTML={{__html:entry.notes}}/>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
       <SH>All Saved Months ({allKeys.length})</SH>
       {allKeys.map(key=>{
         const md=monthData[key]||{};
@@ -3602,6 +3505,105 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts,rosterSaves
           </div>
         );
       })}
+      {/* Roster Calculator Saves */}
+{/* Roster Calculator Saves */}
+      {(rosterSaves||[]).length>0&&(
+        <div style={{border:"1px solid "+A+"44",borderRadius:radius+2,marginBottom:20,overflow:"visible"}}>
+          <div onClick={()=>setRosterOpen(o=>!o)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",background:rosterOpen?S2:"transparent",borderRadius:rosterOpen?(radius+2)+"px "+(radius+2)+"px 0 0":radius+2+"px",cursor:"pointer"}}>
+            <div>
+              <div style={{fontFamily:ff,fontSize:13,color:A,letterSpacing:1.5,textTransform:"uppercase"}}>Roster Calculator — Saved Plans</div>
+              <div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:2}}>{(rosterSaves||[]).length} saved roster plan{(rosterSaves||[]).length!==1?"s":""}</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={A} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="9" x2="9" y2="21"/><line x1="15" y1="9" x2="15" y2="21"/>
+              </svg>
+              <span style={{fontFamily:ff,fontSize:20,color:MU,lineHeight:1}}>{rosterOpen?"-":"+"}</span>
+            </div>
+          </div>
+          {rosterOpen&&(
+            <div style={{padding:"16px",borderTop:"1px solid "+BR,background:S}}>
+              {(rosterSaves||[]).slice().reverse().map((entry,ri)=>{
+                const idx=(rosterSaves.length-1)-ri;
+                const isOpen=rosterExpanded===idx;
+                return(
+                  <div key={idx} style={{border:"1px solid "+BR,borderRadius:radius+2,marginBottom:8,overflow:"hidden"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 14px",background:isOpen?S2:"transparent",cursor:"pointer"}} onClick={()=>setRosterExpanded(isOpen?null:idx)}>
+                      <div>
+                        <div style={{fontFamily:ff,fontSize:13,color:TX}}>{entry.weekLabel||"Untitled Roster"}</div>
+                        <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>Saved {entry.savedAt||"—"} · Tier {entry.tier||"—"} · {entry.totalStaff||0} staff</div>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <div style={{textAlign:"right"}}>
+                          <div style={{fontFamily:ff,fontSize:13,color:GR}}>{entry.totalWages||"—"}</div>
+                          <div style={{fontFamily:ff,fontSize:10,color:MU}}>wages + {entry.adCap||"—"} ad cap</div>
+                        </div>
+                        <button onClick={e=>{e.stopPropagation();if(window.confirm("Delete this roster plan?"))onDeleteRosterSave(idx);}}
+                          style={{background:"transparent",border:"1px solid "+BR,color:MU,padding:"3px 8px",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius}}
+                          onMouseEnter={e=>e.currentTarget.style.borderColor=RD} onMouseLeave={e=>e.currentTarget.style.borderColor=BR}>×</button>
+                        <span style={{fontFamily:ff,fontSize:18,color:MU,lineHeight:1}}>{isOpen?"-":"+"}</span>
+                      </div>
+                    </div>
+                    {isOpen&&(
+                      <div style={{padding:"14px 16px",borderTop:"1px solid "+BR,background:S}}>
+                        {/* Revenue context */}
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
+                          {[["Last Week Gross",entry.rev1],["Week Before",entry.rev2],["Forecast",entry.forecast]].map(([l,v])=>(
+                            <div key={l} style={{background:S2,border:"1px solid "+BR,borderRadius:radius,padding:"8px 10px"}}>
+                              <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:2}}>{l}</div>
+                              <div style={{fontFamily:ff,fontSize:13,color:TX}}>{v||"—"}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Tier & ad cap */}
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
+                          {[["Tier",entry.tier],["Ad Spend Cap",entry.adCap],["Total Hours",entry.totalHours],["Wages % Net Rev",entry.wagesPct]].map(([l,v])=>(
+                            <div key={l} style={{background:S2,border:"1px solid "+BR,borderRadius:radius,padding:"8px 10px"}}>
+                              <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:2}}>{l}</div>
+                              <div style={{fontFamily:ff,fontSize:13,color:l==="Tier"?A:TX}}>{v||"—"}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Staff breakdown */}
+                        {entry.staffLines&&entry.staffLines.length>0&&(
+                          <div>
+                            <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Staff</div>
+                            {entry.staffLines.map((s,si)=>(
+                              <div key={si} style={{display:"flex",justifyContent:"space-between",padding:"7px 10px",background:si%2===0?S2:"transparent",borderRadius:radius,marginBottom:2}}>
+                                <div>
+                                  <span style={{fontFamily:ff,fontSize:12,color:TX,marginRight:8}}>{s.name}</span>
+                                  <span style={{fontFamily:ff,fontSize:10,color:MU}}>{s.role} · {s.depts}</span>
+                                </div>
+                                <div style={{textAlign:"right"}}>
+                                  <span style={{fontFamily:ff,fontSize:12,color:TX}}>{s.finalHrs}hrs</span>
+                                  <span style={{fontFamily:ff,fontSize:11,color:MU,marginLeft:8}}>{s.cost}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {/* Tasks */}
+                        {entry.taskLines&&entry.taskLines.length>0&&(
+                          <div style={{marginTop:10}}>
+                            <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Special Tasks</div>
+                            {entry.taskLines.map((t,ti)=>(
+                              <div key={ti} style={{fontFamily:ff,fontSize:11,color:MU,padding:"4px 0"}}>{t.name} — {t.hrs}hrs ({t.dept1}{t.dept2?"+"+t.dept2:""})</div>
+                            ))}
+                          </div>
+                        )}
+                        {entry.notes&&(
+                          <div style={{marginTop:10,padding:"10px 12px",background:A+"0f",border:"1px solid "+A+"33",borderRadius:radius,fontFamily:ff,fontSize:11,color:TX,lineHeight:1.7}} dangerouslySetInnerHTML={{__html:entry.notes}}/>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }
@@ -3878,6 +3880,34 @@ function PasswordScreen({onAuth,labels}){
   );
 }
 
+// ─── Generic Full-Page Modal (Margin Analysis, Targets) ─────────────────────
+function FullPageModal({title,icon,onClose,children}){
+  const {BG,BR,A,MU,TX,ff,radius}=useTheme();
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:1100,background:BG,overflowY:"auto"}}>
+      <div style={{borderBottom:"1px solid "+BR,padding:"0 24px",position:"sticky",top:0,background:BG,zIndex:10}}>
+        <div style={{maxWidth:1200,margin:"0 auto",padding:"18px 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{color:A,fontSize:18,fontWeight:"bold",fontFamily:ff}}>{icon}</span>
+            <div>
+              <div style={{fontFamily:ff,fontSize:9,letterSpacing:4,color:A,textTransform:"uppercase",marginBottom:3}}>Finance Operations</div>
+              <h1 style={{margin:0,fontFamily:ff,fontSize:20,fontWeight:"normal",letterSpacing:2,color:TX,textTransform:"uppercase"}}>{title}</h1>
+            </div>
+          </div>
+          <button onClick={onClose}
+            style={{background:"transparent",border:"1px solid "+BR,color:MU,padding:"8px 14px",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}
+            onMouseEnter={e=>e.currentTarget.style.borderColor=A} onMouseLeave={e=>e.currentTarget.style.borderColor=BR}>
+            ← Back to P&L
+          </button>
+        </div>
+      </div>
+      <div style={{maxWidth:1200,margin:"0 auto",padding:"28px 24px"}}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 // ─── Roster Calculator Modal ──────────────────────────────────────────────────
 function RosterCalculatorModal({onClose,curWeeks,monthData,settings,onSaveRosterEntry}){
   const {BG,S,S2,BR,A,MU,TX,GR,RD,YL,ff,radius}=useTheme();
@@ -3895,25 +3925,29 @@ function RosterCalculatorModal({onClose,curWeeks,monthData,settings,onSaveRoster
 
   // Get last 2 weeks gross from P&L data
   function getRecentGross(){
-    // Collect all weeks across all months, sorted by weekNum desc
+    // Collect weeks from ALL saved months sorted by month key (chronological)
     const allWeeks=[];
-    Object.values(monthData||{}).forEach(md=>{
-      (md.weeks||[]).forEach(w=>{
+    const sortedMonthKeys=Object.keys(monthData||{}).sort();
+    sortedMonthKeys.forEach(mk=>{
+      const md=monthData[mk];
+      (md?.weeks||[]).forEach(w=>{
         const g=parseFloat(w?.revenue?.gross_sales)||0;
-        if(g>0)allWeeks.push({label:w.label,gross:g,dateRange:w.dateRange});
+        if(g>0)allWeeks.push({label:w.label,gross:g,mk});
       });
     });
-    // Also look at curWeeks
+    // Also include curWeeks that have data and aren't already captured by their month key
     (curWeeks||[]).forEach(w=>{
       const g=parseFloat(w?.revenue?.gross_sales)||0;
-      if(g>0&&!allWeeks.find(x=>x.label===w.label))allWeeks.push({label:w.label,gross:g,dateRange:w.dateRange});
+      if(g>0&&!allWeeks.find(x=>x.label===w.label))
+        allWeeks.push({label:w.label,gross:g,mk:"current"});
     });
-    // Return last 2 in reverse order
-    const recent=allWeeks.slice(-2).reverse();
-    return {rev1:recent[0]?.gross||"", rev2:recent[1]?.gross||""};
+    // The last 2 entries are the most recent completed weeks
+    const last=allWeeks[allWeeks.length-1];
+    const prev=allWeeks[allWeeks.length-2];
+    return {rev1:last?.gross||"", rev2:prev?.gross||"", rev1Label:last?.label||"", rev2Label:prev?.label||""};
   }
 
-  const {rev1:initRev1,rev2:initRev2}=getRecentGross();
+  const {rev1:initRev1,rev2:initRev2,rev1Label:initRev1Label,rev2Label:initRev2Label}=getRecentGross();
 
   // ── Constants ──
   const DEPTS=['operations','marketing','logistics','retail','custsvc','hr'];
@@ -3930,6 +3964,8 @@ function RosterCalculatorModal({onClose,curWeeks,monthData,settings,onSaveRoster
 
   const [rev1,setRev1]=useState(String(initRev1));
   const [rev2,setRev2]=useState(String(initRev2));
+  const [rev1Label]=useState(initRev1Label);
+  const [rev2Label]=useState(initRev2Label);
   const [revForecast,setRevForecast]=useState("");
   const [confidence,setConfidence]=useState("medium");
   const [tierOverride,setTierOverride]=useState("auto");
@@ -4101,11 +4137,11 @@ function RosterCalculatorModal({onClose,curWeeks,monthData,settings,onSaveRoster
             <div style={sectionLabel}>Revenue Context</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
               <div>
-                <label style={lbl}>Last week gross ($)</label>
+                <label style={lbl}>{rev1Label?"Last week gross — "+rev1Label+" ($)":"Last week gross ($)"}</label>
                 <input type="number" value={rev1} onChange={e=>setRev1(e.target.value)} style={inp} placeholder="32000"/>
               </div>
               <div>
-                <label style={lbl}>Week before that ($)</label>
+                <label style={lbl}>{rev2Label?"Week before — "+rev2Label+" ($)":"Week before that ($)"}</label>
                 <input type="number" value={rev2} onChange={e=>setRev2(e.target.value)} style={inp} placeholder="28000"/>
               </div>
             </div>
@@ -4133,7 +4169,7 @@ function RosterCalculatorModal({onClose,curWeeks,monthData,settings,onSaveRoster
             <div style={sectionLabel}>Week Plan</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
               <div>
-                <label style={lbl}>Roster week (label)</label>
+                <label style={lbl}>Roster week — forecasting for <span style={{color:A}}>{weekDate||"next week"}</span></label>
                 <input type="text" value={weekDate} onChange={e=>setWeekDate(e.target.value)} style={inp} placeholder="e.g. 10 Mar – 16 Mar"/>
               </div>
               <div>
@@ -4206,10 +4242,11 @@ function RosterCalculatorModal({onClose,curWeeks,monthData,settings,onSaveRoster
               </thead>
               <tbody>
                 {staffCalc.map((s,si)=>(
-                  <StaffRow key={s.id} s={s} si={si} tier={tier||'B'} DEPT_LABELS={DEPT_LABELS} DEPT_COLORS={DEPT_COLORS}
+                  <StaffRow key={s.id} s={s} si={si} tier={tier||'B'} DEPT_LABELS={DEPT_LABELS} DEPT_COLORS={DEPT_COLORS} DEPTS={DEPTS}
                     onNameChange={v=>{setStaff(prev=>{const n=[...prev];n[si]={...n[si],name:v};return n;});}}
                     onRoleChange={v=>{setStaff(prev=>{const n=[...prev];n[si]={...n[si],role:v};return n;});}}
                     onRateChange={v=>{setStaff(prev=>{const n=[...prev];n[si]={...n[si],rate:parseFloat(v)||0};return n;});}}
+                    onDeptsChange={v=>{setStaff(prev=>{const n=[...prev];n[si]={...n[si],depts:v};return n;});}}
                     onHrChange={v=>setHrOverride(s.id,v)}
                     onRemove={()=>removeStaff(si)}
                     fmtD={fmtD} inp={inp} ff={ff} MU={MU} TX={TX} BR={BR} A={A} RD={RD} S2={S2} radius={radius}
@@ -4288,32 +4325,55 @@ function RosterCalculatorModal({onClose,curWeeks,monthData,settings,onSaveRoster
 }
 
 // ── Inline-editable StaffRow for RosterCalculator ──────────────────────────
-function StaffRow({s,si,DEPT_LABELS,DEPT_COLORS,onNameChange,onRoleChange,onRateChange,onHrChange,onRemove,fmtD,inp,ff,MU,TX,BR,A,RD,S2,radius}){
+function StaffRow({s,si,DEPTS,DEPT_LABELS,DEPT_COLORS,onNameChange,onRoleChange,onRateChange,onDeptsChange,onHrChange,onRemove,fmtD,inp,ff,MU,TX,BR,A,RD,S2,radius}){
   const [editingField,setEditingField]=useState(null);
   const [val,setVal]=useState("");
-  const startEdit=(field,current)=>{setEditingField(field);setVal(current);};
+  const [editDepts,setEditDepts]=useState(null); // null = not editing, else [d1, d2|""]
+  const startEdit=(field,current)=>{setEditingField(field);setVal(String(current));};
   const commit=(field)=>{
-    if(field==='name')onNameChange(val);
-    else if(field==='role')onRoleChange(val);
-    else if(field==='rate')onRateChange(val);
+    if(field==="name")onNameChange(val);
+    else if(field==="role")onRoleChange(val);
+    else if(field==="rate")onRateChange(val);
     setEditingField(null);
   };
+  const startDeptEdit=()=>setEditDepts([s.depts[0]||"operations", s.depts[1]||""]);
+  const commitDepts=()=>{
+    const d=editDepts[1]?[editDepts[0],editDepts[1]]:[editDepts[0]];
+    onDeptsChange(d);
+    setEditDepts(null);
+  };
   const cellStyle={borderBottom:"1px solid "+BR+"44",padding:"7px 8px",fontFamily:ff,fontSize:12,color:TX,verticalAlign:"middle"};
+  const selStyle={...inp,fontSize:11,padding:"4px 6px",appearance:"none",width:"auto",flex:1};
   const EditableCell=({field,display,numeric})=>(
     editingField===field
-      ?<td style={cellStyle}><input autoFocus type={numeric?"number":"text"} value={val} onChange={e=>setVal(e.target.value)} onBlur={()=>commit(field)} onKeyDown={e=>{if(e.key==='Enter'||e.key==='Escape')commit(field);}} style={{...inp,width:"100%",fontSize:12,padding:"4px 6px"}}/></td>
-      :<td onClick={()=>startEdit(field,numeric?s[field]:s[field])} style={{...cellStyle,cursor:"pointer",textDecoration:"underline dotted",textDecorationColor:MU}}>{display}</td>
+      ?<td style={cellStyle}><input autoFocus type={numeric?"number":"text"} value={val} onChange={e=>setVal(e.target.value)} onBlur={()=>commit(field)} onKeyDown={e=>{if(e.key==="Enter"||e.key==="Escape")commit(field);}} style={{...inp,fontSize:12,padding:"4px 6px"}}/></td>
+      :<td onClick={()=>startEdit(field,numeric?s[field]:s[field])} style={{...cellStyle,cursor:"pointer"}} title="Click to edit">
+        <span style={{borderBottom:"1px dotted "+MU}}>{display}</span>
+      </td>
   );
   return(
     <tr style={{background:s.fixed?S2+"44":"transparent"}} onMouseEnter={e=>e.currentTarget.style.background=S2} onMouseLeave={e=>e.currentTarget.style.background=s.fixed?S2+"44":"transparent"}>
       <EditableCell field="name" display={<span style={{fontWeight:"bold"}}>{s.name}</span>}/>
       <EditableCell field="role" display={s.role}/>
       <td style={cellStyle}>
-        <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-          {s.depts.map(d=>(
-            <span key={d} style={{fontSize:10,padding:"2px 6px",border:"1px solid "+(DEPT_COLORS[d]+"44"),color:DEPT_COLORS[d],background:DEPT_COLORS[d]+"11",borderRadius:2}}>{DEPT_LABELS[d]}</span>
-          ))}
-        </div>
+        {editDepts
+          ?<div style={{display:"flex",gap:4,alignItems:"center"}}>
+              <select value={editDepts[0]} onChange={e=>setEditDepts([e.target.value,editDepts[1]])} style={selStyle}>
+                {DEPTS.map(d=><option key={d} value={d}>{DEPT_LABELS[d]}</option>)}
+              </select>
+              <select value={editDepts[1]} onChange={e=>setEditDepts([editDepts[0],e.target.value])} style={selStyle}>
+                <option value="">+ None</option>
+                {DEPTS.map(d=><option key={d} value={d}>{DEPT_LABELS[d]}</option>)}
+              </select>
+              <button onClick={commitDepts} style={{background:A,border:"none",color:"#fff",padding:"3px 8px",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,whiteSpace:"nowrap"}}>✓ Done</button>
+            </div>
+          :<div onClick={startDeptEdit} style={{display:"flex",gap:3,flexWrap:"wrap",cursor:"pointer"}} title="Click to edit departments">
+              {s.depts.map(d=>(
+                <span key={d} style={{fontSize:10,padding:"2px 6px",border:"1px solid "+(DEPT_COLORS[d]+"55"),color:DEPT_COLORS[d],background:DEPT_COLORS[d]+"15",borderRadius:2,borderBottom:"1px dotted "+DEPT_COLORS[d]}}>{DEPT_LABELS[d]}</span>
+              ))}
+              <span style={{fontSize:10,color:MU,alignSelf:"center",marginLeft:2}}>✎</span>
+            </div>
+        }
       </td>
       <EditableCell field="rate" display={fmtD(s.rate)} numeric/>
       <td style={{...cellStyle,textAlign:"right",color:MU}}>{s.base}</td>
@@ -4377,6 +4437,8 @@ function App(){
   const [labelsRaw,setLabelsRaw]=useState(DEFAULT_LABELS);
   const [showSettings,setShowSettings]=useState(false);
   const [showRoster,setShowRoster]=useState(false);
+  const [showMargin,setShowMargin]=useState(false);
+  const [showTargets,setShowTargets]=useState(false);
 
   const availableMonths=getAvailableMonths();
   const now=new Date();
@@ -4521,8 +4583,6 @@ function App(){
   const TABS=[
     {id:"input",key:"tab_input"},{id:"overview",key:"tab_overview"},{id:"visualise",key:"tab_visualise"},
     {id:"compare",key:"tab_compare"},{id:"fixed",key:"tab_fixed"},
-    {id:"margin",key:"tab_margin"},
-    {id:"targets",key:"tab_targets"},
     {id:"reports",key:"tab_reports",suffix:" ("+Object.keys(monthData).length+")"},
   ];
 
@@ -4555,6 +4615,22 @@ function App(){
                     ⚠ {dataWarnings.length} data warning{dataWarnings.length>1?"s":""}
                   </div>
                 )}
+                {/* Margin Analysis button */}
+                <button onClick={()=>setShowMargin(true)}
+                  title="Margin Analysis"
+                  style={{background:"transparent",border:"1px solid "+BR,borderRadius:radius,padding:"7px 9px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,fontFamily:ff,fontSize:13,color:MU,fontWeight:"bold"}}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor=A;e.currentTarget.style.color=A;}} onMouseLeave={e=>{e.currentTarget.style.borderColor=BR;e.currentTarget.style.color=MU;}}>
+                  %
+                </button>
+                {/* Targets button */}
+                <button onClick={()=>setShowTargets(true)}
+                  title="Targets & Alerts"
+                  style={{background:"transparent",border:"1px solid "+BR,borderRadius:radius,padding:"7px 9px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}
+                  onMouseEnter={e=>e.currentTarget.style.borderColor=A} onMouseLeave={e=>e.currentTarget.style.borderColor=BR}>
+                  <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={MU} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+                  </svg>
+                </button>
                 {/* Roster Calculator button */}
                 <button onClick={()=>setShowRoster(true)}
                   title="Roster & Ad Spend Calculator"
@@ -4659,8 +4735,17 @@ function App(){
             </div>
           )}
 
-          {tab==="margin"&&!loading&&(
+          {tab==="reports"&&!loading&&(
             <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+4,padding:"24px 28px"}}>
+              <ReportsPage monthData={monthData} fixed={fixed} onSave={handleSaveMonthData} onExport={handleExport} opexKeys={opexKeys} depts={wageDepts} rosterSaves={settings?.rosterSaves||[]} onDeleteRosterSave={idx=>{const ns={...(settings||{}),rosterSaves:((settings||{}).rosterSaves||[]).filter((_,i)=>i!==idx)};updateSettings(ns);}}/>
+            </div>
+          )}
+        </div>
+
+        {/* Margin Analysis Modal */}
+        {showMargin&&(
+          <ThemeContext.Provider value={theme}>
+            <FullPageModal title="Margin Analysis" icon="%" onClose={()=>setShowMargin(false)}>
               <MarginAnalysisPage
                 productMarginData={curEntry?.productMarginData||[]}
                 productCatalogue={settings?.productCatalogue||{}}
@@ -4669,11 +4754,14 @@ function App(){
                 targetMargin={curWeeks[0]?.weekTargets?.gross_margin_target||55}
                 satchelCost={fixed?.satchelCostDefault||"0.85"}
               />
-            </div>
-          )}
+            </FullPageModal>
+          </ThemeContext.Provider>
+        )}
 
-          {tab==="targets"&&!loading&&(
-            <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+4,padding:"24px 28px"}}>
+        {/* Targets Modal */}
+        {showTargets&&(
+          <ThemeContext.Provider value={theme}>
+            <FullPageModal title="Targets & Alerts" icon={<svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>} onClose={()=>setShowTargets(false)}>
               <TargetsPage
                 curWeeks={curWeeks}
                 onUpdateWeeks={updateWeeks}
@@ -4682,15 +4770,9 @@ function App(){
                 monthData={monthData}
                 selMonthKey={curKey}
               />
-            </div>
-          )}
-
-          {tab==="reports"&&!loading&&(
-            <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+4,padding:"24px 28px"}}>
-              <ReportsPage monthData={monthData} fixed={fixed} onSave={handleSaveMonthData} onExport={handleExport} opexKeys={opexKeys} depts={wageDepts} rosterSaves={settings?.rosterSaves||[]} onDeleteRosterSave={idx=>{const ns={...(settings||{}),rosterSaves:((settings||{}).rosterSaves||[]).filter((_,i)=>i!==idx)};updateSettings(ns);}}/>
-            </div>
-          )}
-        </div>
+            </FullPageModal>
+          </ThemeContext.Provider>
+        )}
 
         {/* Roster Calculator Modal */}
         {showRoster&&(
