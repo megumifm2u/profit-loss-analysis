@@ -171,8 +171,8 @@ const DEFAULT_LABELS = {
   disc_field_cogs:"Manufacturing COGS of goods sent ($)",
   disc_field_codes:"Discount codes in this bucket (comma separated)",
   // Buttons
-  btn_generate_export:"GENERATE EXPORT", btn_generate_export_sub:"paste into claude for deep insights",
-  btn_monthly_export:"GENERATE EXPORT", btn_monthly_export_sub:"paste into claude for deep insights",
+  btn_generate_export:"WEEKLY ANALYSIS EXPORT", btn_generate_export_sub:"surgical week review — paste into claude",
+  btn_monthly_export:"MONTHLY ANALYSIS EXPORT", btn_monthly_export_sub:"trend & strategy review — paste into claude",
   btn_monthly_summary:"Generate Monthly Summary", btn_monthly_summary_sub:"copy for notion / export",
   btn_compare_export:"GENERATE EXPORT", btn_compare_export_sub:"comparative analysis export for claude",
   btn_weekly_budget_export:"GENERATE BUDGET PLAN", btn_weekly_budget_export_sub:"next week staffing and budget guide",
@@ -750,14 +750,127 @@ function parseProductMargin(raw){
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────
-function generateExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,labels,factors,productMarginData){
+function generateWeeklyExport(week,fixed,opexKeys,depts,staff,labels,productMarginData){
+  const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const pct=(v,b)=>b>0?((v/b)*100).toFixed(1)+"%":"0.0%";
+  const keys=opexKeys||DEFAULT_OPEX_KEYS;
+  const wDepts=depts||DEFAULT_WAGE_DEPTS;
+  const c=calcWeek(week,fixed,keys,wDepts);
+  const targets=week.weekTargets||DEFAULT_TARGETS;
+  const gross=n(week.revenue.gross_sales);
+  const dr=c.discReclass||{};
+  const promoRate=gross>0?(c.truePromoDisc/gross)*100:0;
+  const refundRate=gross>0?(n(week.revenue.refunds)/gross)*100:0;
+  const srOrders=dr.serviceRecoveryOrders||0;
+  const srCost=dr.serviceRecoveryCOGS||0;
+  const srCostPerOrder=srOrders>0?srCost/srOrders:0;
+  const cogsPct=c.netRevenue>0?(c.totalCOGS/c.netRevenue)*100:0;
+  const opexPct=c.netRevenue>0?(c.totalOPEX/c.netRevenue)*100:0;
+  const wagesPct=c.netRevenue>0?(c.totalWages/c.netRevenue)*100:0;
+  const netYield=gross>0?(c.netRevenue/gross)*100:0;
+  const satchelCount=n(week.cogs.satchel_count);
+  const adSpend=n(week.opex?.meta_tiktok_ads||0);
+  const adROAS=adSpend>0?c.netRevenue/adSpend:0;
+  const shipSubsidy=n(week.revenue.shipping_income)-c.totalFreight;
+  const costPerOrder=satchelCount>0?c.totalFreight/satchelCount:0;
+  let tier="B",tierName="Standard Week (Tier B — $24K–$30K)";
+  if(gross<24000){tier="A";tierName="Quiet Week (Tier A — <$24K)";}
+  else if(gross>=30000){tier="C";tierName="Strong Week (Tier C — >$30K)";}
+  const tierAdCap=tier==="A"?6570:tier==="C"?11169:9330;
+  const tierROASFloor=tier==="A"?3.3:tier==="C"?2.9:3.0;
+  let o="=== WEEKLY P&L — "+week.label+" | "+week.dateRange+" ===\nGenerated: "+new Date().toLocaleDateString("en-AU")+"\n\n";
+  o+="--- RAW DATA ---\n";
+  o+="Gross Sales: "+fmt(gross)+"\n";
+  o+="Refunds: -"+fmt(n(week.revenue.refunds))+" ("+refundRate.toFixed(1)+"% of gross)\n";
+  o+="Total Discounts (all codes): -"+fmt(n(week.revenue.discounts))+"\n";
+  o+="  → Service Recovery (reclassified to COGS): "+fmt(srCost)+" | "+srOrders+" orders\n";
+  o+="  → Marketing / Influencer gifting (reclassified to OPEX): "+fmt(dr.marketingDisc||0)+"\n";
+  o+="  → Staff discounts (reclassified to wages): "+fmt(dr.staffDisc||0)+"\n";
+  o+="  → True promotional (stays as revenue deduction): "+fmt(c.truePromoDisc)+" ("+promoRate.toFixed(1)+"% of gross)\n";
+  o+="Shipping Income: +"+fmt(n(week.revenue.shipping_income))+"\n";
+  o+="PayPal Fees: -"+fmt(n(week.revenue.paypal_fees))+"\n";
+  o+="NET REVENUE: "+fmt(c.netRevenue)+" (net yield: "+netYield.toFixed(1)+"% of gross)\n\n";
+  o+="COGS Breakdown:\n";
+  o+="  Manufacturing Product: "+fmt(c.mfgP)+"\n";
+  o+="  Manufacturing Shipping (Inbound): "+fmt(c.mfgS)+"\n";
+  o+="  Satchels: "+satchelCount+" orders × $"+(week.cogs.satchel_cost_each||fixed?.satchelCostDefault||"0.85")+" = "+fmt(c.satchel)+"\n";
+  o+="  Other Packaging: "+fmt(c.otherPkg)+"\n";
+  o+="  Service Recovery COGS (reclassified from discounts): "+fmt(srCost)+"\n";
+  o+="  TOTAL COGS: "+fmt(c.totalCOGS)+" ("+cogsPct.toFixed(1)+"% of net rev) | Target: ≤"+targets.cogs_pct_target+"%\n\n";
+  o+="GROSS PROFIT: "+fmt(c.grossProfit)+" | GROSS MARGIN: "+c.grossMargin.toFixed(1)+"% | Target: "+targets.gross_margin_target+"%\n\n";
+  o+="OPEX Breakdown:\n";
+  o+="  Freight Total: "+fmt(c.totalFreight)+" | Net Shipping Subsidy: "+fmt(shipSubsidy)+(satchelCount>0?" | Cost/order shipped: "+fmt(costPerOrder):"")+"\n";
+  keys.filter(k=>k.group==="freight"&&!k.sub).forEach(k=>{const v=week.opex?.[k.key]!==""?n(week.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);if(v>0)o+="    "+k.label+": "+fmt(v)+"\n";});
+  o+="  Collabs Total: "+fmt(c.totalCollabs)+"\n";
+  keys.filter(k=>k.group==="collabs").forEach(k=>{const v=week.opex?.[k.key]!==""?n(week.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);if(v>0)o+="    "+k.label+": "+fmt(v)+"\n";});
+  o+="  Influencer Gifting (reclassified): "+fmt(dr.marketingDisc||0)+"\n";
+  o+="  General OPEX:\n";
+  keys.filter(k=>k.group==="general").forEach(k=>{const v=week.opex?.[k.key]!==""?n(week.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):(fixed?.monthlyFixedKeys?.includes(k.key)?n(fixed?.monthlyValues?.[k.key])/4:0));if(v>0)o+="    "+k.label+": "+fmt(v)+"\n";});
+  o+="  TOTAL OPEX: "+fmt(c.totalOPEX)+" ("+opexPct.toFixed(1)+"% of net rev) | Target: ≤"+targets.opex_pct_target+"%\n\n";
+  o+="WAGES Breakdown:\n";
+  wDepts.forEach(dept=>{dept.subs.forEach(sub=>{const v=n(week.wages?.[sub.key]||0);if(v>0)o+="  "+sub.label+" ("+dept.label+"): "+fmt(v)+"\n";});});
+  o+="  Staff Discounts (reclassified): "+fmt(dr.staffDisc||0)+"\n";
+  o+="  TOTAL WAGES: "+fmt(c.totalWages)+" ("+wagesPct.toFixed(1)+"% of net rev) | Target: ≤"+targets.wages_pct_target+"%\n\n";
+  o+="TOTAL EXPENSES: "+fmt(c.totalExpenses)+(satchelCount>0?" | Total cost/order: "+fmt(c.totalExpenses/satchelCount):"")+"\n";
+  o+="NET PROFIT: "+fmt(c.netProfit)+" | NET MARGIN: "+c.netMargin.toFixed(1)+"% | Target: "+targets.net_margin_target+"%\n\n";
+  o+="--- OPERATIONAL CONTEXT ---\n";
+  o+="Revenue Tier This Week: "+tierName+"\n";
+  o+="Orders Processed: "+satchelCount+(satchelCount>0?" | Avg gross/order: "+fmt(gross/satchelCount)+" | Avg net/order: "+fmt(c.netRevenue/satchelCount):"")+"\n";
+  o+="Net Shipping Subsidy: "+fmt(shipSubsidy)+" (shipping income minus outbound freight"+(shipSubsidy<0?" — business is subsidising delivery":"")+")"+"\n";
+  if(adSpend>0){o+="Paid Ads: "+fmt(adSpend)+" | ROAS: "+adROAS.toFixed(2)+"x | Ad spend % of net rev: "+(c.netRevenue>0?(adSpend/c.netRevenue*100).toFixed(1):0)+"%\n";o+="Tier Ad Cap: "+fmt(tierAdCap)+" | Headroom: "+fmt(tierAdCap-adSpend)+" | ROAS Floor: "+tierROASFloor+"x"+(adROAS<tierROASFloor?" ⚠ BELOW FLOOR":"")+"\n";}
+  else{o+="Paid Ads: not entered | Tier Ad Cap: "+fmt(tierAdCap)+" (ROAS floor: "+tierROASFloor+"x)\n";}
+  o+="\n";
+  if(srOrders>0){
+    o+="--- SERVICE RECOVERY ---\n";
+    o+=srOrders+" orders | Total cost: "+fmt(srCost)+" | Per order: "+fmt(srCostPerOrder)+" | Annualised: "+fmt(srCost*52)+"\n";
+    const codeData=week.codeData||{};
+    DISCOUNT_CODE_REGISTRY.filter(rc=>rc.category==="service_recovery").forEach(code=>{const d=codeData[code.id];if(d&&(n(d.orders)>0||n(d.retailValue)>0)){o+="  "+code.id+": "+n(d.orders)+" orders | retail: "+fmt(n(d.retailValue))+" | COGS: "+fmt(n(d.cogsValue))+" | ship: "+fmt(n(d.shippingValue))+"\n";o+="    → "+code.useCase+"\n";}});
+    o+="\n";
+  }
+  if(staff&&staff.length>0){
+    const budgeted=staff.reduce((s,m)=>s+n(m.hourlyRate)*n(m.hoursPerWeek),0);const variance=c.totalWages-budgeted;
+    o+="--- WAGES VS ROSTER BUDGET ---\n";
+    staff.forEach(s=>{o+="  "+s.name+" ("+s.type+"): "+n(s.hoursPerWeek)+"hrs × $"+n(s.hourlyRate).toFixed(2)+" = "+fmt(n(s.hourlyRate)*n(s.hoursPerWeek))+"\n";});
+    o+="  Budgeted: "+fmt(budgeted)+" | Actual: "+fmt(c.totalWages)+" | Variance: "+(variance>=0?"+":"")+fmt(variance)+"\n\n";
+  }
+  const productList=(productMarginData||[]).slice().sort((a,b)=>b.netSales-a.netSales);
+  if(productList.length>0){
+    const gmTarget=targets.gross_margin_target||55;
+    o+="--- PRODUCT MARGIN THIS WEEK ---\n";
+    productList.forEach(p=>{const m=p.netSales>0?(p.grossProfit/p.netSales)*100:0;const dr2=p.gross>0?(p.discounts/p.gross)*100:0;const flag=p.netSales<=0&&p.gross>0?"[FULLY GIFTED]":m<gmTarget?"[BELOW "+gmTarget+"% TARGET]":"";o+="  "+p.product+": "+Math.round(p.units)+"u | Net "+fmt(p.netSales)+" | Disc "+dr2.toFixed(1)+"% | COGS "+fmt(p.totalCogs)+" | GP "+fmt(p.grossProfit)+" | Margin "+m.toFixed(1)+"%"+(flag?" "+flag:"")+"\n";});
+    o+="\n";
+  }
+  if(week.notes)o+="--- OPERATOR NOTES ---\n"+week.notes+"\n\n";
+  const alerts=generateAlerts(week,c.netRevenue,dr,gross,targets);
+  if(alerts.length){o+="--- TRIGGERED ALERTS ---\n";alerts.forEach(a=>{o+="⚠ "+a.title+": "+a.metric+"\n  → "+a.action+"\n";});o+="\n";}
+  o+="=== END DATA ===\n\n";
+  o+="You are a COO-level financial advisor AND operational director. This is ONE WEEK of P&L data. Your job is to identify exactly what went wrong or right this specific week AND give precise operational instructions the team executes before next Monday. Be surgical, specific, and commercially brutal. Use exact dollar figures throughout. No generalisations — name the platform, vendor, staff role, or product SKU.\n\n";
+  o+="1. WEEK VERDICT — 2–3 sentences: was this a good or bad week? What was the single biggest driver? Exact dollar figures only.\n\n";
+  o+="2. NET REVENUE QUALITY — True promo discount rate vs "+targets.promo_disc_rate_max+"% target, refund rate vs "+targets.refund_rate_max+"% target, net yield per gross dollar. State exactly how much margin was destroyed if any metric is off.\n\n";
+  o+="3. GROSS MARGIN DIAGNOSIS — Hit or miss vs "+targets.gross_margin_target+"% target? Discount mix problem, COGS issue, or service recovery bleed? State exactly what changes next week to hit target — in dollar and percentage terms.\n\n";
+  o+="4. COGS LINE BY LINE — Is manufacturing proportionate? Is service recovery elevated — if so, which exact codes fired, what product or logistics failure caused it, annualised cost if this continues weekly?\n\n";
+  o+="5. OPEX EFFICIENCY — Every non-zero OPEX line. For each: proportionate to revenue? Which line has most dollar leverage if reduced? Name the vendor or cost specifically.\n\n";
+  o+="6. FREIGHT DEEP DIVE — Net shipping subsidy this week: "+fmt(shipSubsidy)+". Cost per order shipped"+(satchelCount>0?" ("+fmt(costPerOrder)+" this week)":"")+". Is the business subsidising delivery? What revenue per order threshold recovers outbound freight?\n\n";
+  o+="7. WAGES EFFICIENCY — Wages "+wagesPct.toFixed(1)+"% of net revenue vs "+targets.wages_pct_target+"% target. If over, by how many hours and at what dollar cost? Optimal total wages bill at this week\'s revenue of "+fmt(c.netRevenue)+"? Variance vs roster budget?\n\n";
+  o+="8. DISCOUNT RECLASSIFICATION IMPACT — Service recovery cost per order vs $"+targets.service_recovery_cost_alert+" threshold. Which codes drove most cost? One-off or repeating? Marketing gifting justified? Staff discounts material?\n\n";
+  o+="9. PRODUCT MARGIN — If product data provided: which products dragged blended margin below target? Discounted below break-even? Fully gifted with unrecovered COGS? Specific discount codes to block per product next week?\n\n";
+  o+="10. AD SPEND & TIER ANALYSIS — This week is "+tierName+". "+(adSpend>0?"Actual spend: "+fmt(adSpend)+" vs cap: "+fmt(tierAdCap)+". ROAS: "+adROAS.toFixed(2)+"x vs floor: "+tierROASFloor+"x. ":"No ad spend entered. ")+"Answer: (a) Was spend within tier cap? If over, which platform to cut first? (b) Was ROAS above floor? If below, exact dollar overspend and platforms to pause immediately. (c) "+( tier==="A"?"TIER A — all collab activations and gifting must be held. Calculate exact net profit cost of activating one collab this week at current gross margin. State in dollar terms.":tier==="C"?"TIER C — collabs and gifting permitted. State maximum gifting budget at current gross margin, minimum revenue uplift required per active collab at 3x ROAS, which collab codes active vs paused.":"TIER B — standard ops. Should ad spend scale up, hold, or trim next week? Give specific dollar figure for next week\'s ad budget.")+" (d) Recommended daily ad spend cap for next week by platform. (e) Is there visible correlation between this week\'s ad spend and revenue — is the spend actually working?\n\n";
+  o+="11. ROSTER & STAFFING PLAN FOR NEXT WEEK — Wages actual "+fmt(c.totalWages)+" ("+wagesPct.toFixed(1)+"% of net) vs "+targets.wages_pct_target+"% target. (a) Maximum total wages bill next week to hit target at same revenue run rate — dollar ceiling. (b) Break down by department: Operations, Logistics, Retail, Customer Service, Marketing, HR — recommended hours per department. (c) For each department: daily coverage pattern and specific tasks that drove over/underage this week. (d) If over target: name exactly which shift or department to cut and by how many hours and dollars. (e) If under: flag whether operational gaps occurred. (f) Revenue tier for next week: if Tier A, which flex staff reduce hours? If Tier C, which departments flex up?\n\n";
+  o+="12. ORDER VOLUME FORECASTING & LOGISTICS PLANNING — This week: "+satchelCount+" orders at "+fmt(gross)+(satchelCount>0?" (avg "+fmt(gross/satchelCount)+"/order)":"")+". (a) Low/base/high order forecast for next week. (b) Satchel stock required for base forecast. (c) Outbound freight budget at current cost-per-order. (d) Service recovery "+srOrders+" orders this week — one-off or systemic QC/logistics issue? If RESHIP- codes fired, name likely root cause and specific ops check before Monday dispatch. (e) Is order volume trending up or down vs prior weeks? Implication for logistics staffing?\n\n";
+  o+="13. COLLAB & INFLUENCER DECISIONS FOR NEXT WEEK — Tier: "+tierName+". (a) Should any collab activations proceed? Yes/no with dollar justification. (b) Minimum revenue uplift required to justify active collab at current gifting cost — use gross margin % to calculate true cost. (c) "+( tier==="A"?"TIER A: all collabs on hold. At "+fmt(c.totalOPEX)+" OPEX and "+c.netMargin.toFixed(1)+"% net margin, what would adding collab gifting cost in net profit? Exact dollar and percentage.":tier==="C"?"TIER C: gifting permitted. Maximum gifting budget at current gross margin, which collab codes active vs paused, minimum ROAS per active collab.":"TIER B: collabs permitted if ROAS justifies. Maximum gifting budget that keeps net margin above target.")+" (d) Flag any collab codes that fired this week — was revenue return visible? Specific ROAS calculation.\n\n";
+  o+="14. TOP 3 IMMEDIATE ACTIONS — Each must have: (i) exact dollar impact calculated from this week\'s data, (ii) specific mechanism naming the platform/vendor/staff role/product SKU, (iii) earliest implementation day this week, (iv) trade-off or risk. These are executed THIS WEEK before next Monday. No generalisations.\n\n";
+  o+="15. NEXT WEEK BUDGET CEILINGS — Exact dollar ceilings for: COGS (max $), OPEX (max $ total and by category: freight, collabs, ads, general), Wages (max $ total and by department), Ad Spend (max $ with tier justification — "+tierName+", cap "+fmt(tierAdCap)+"). Then state: (a) break-even revenue at current cost structure, (b) revenue needed to hit "+targets.net_margin_target+"% net margin, (c) single change with largest margin impact requiring zero revenue increase.\n\nUse exact figures throughout. Every sentence must be actionable. Flag structural problems explicitly.";
+  return o;
+}
+
+function generateMonthlyExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,labels,factors,productMarginData){
   const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
   const pct=(v,b)=>b>0?((v/b)*100).toFixed(1)+"%":"0.0%";
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   const mc=calcMonth(weeks,fixed,extras,keys,wDepts);
   const wFactors=factors||weeks.map(()=>1);
-  const pRate=(wc,i)=>{const f=wFactors[i];return{netRevenue:wc.netRevenue*f,totalCOGS:wc.totalCOGS*f,grossProfit:wc.grossProfit*f,grossMargin:wc.grossMargin,netMargin:wc.netMargin,totalFreight:wc.totalFreight*f,totalCollabs:wc.totalCollabs*f,totalWages:wc.totalWages*f,totalOPEX:wc.totalOPEX*f,totalExpenses:wc.totalExpenses*f,netProfit:wc.netProfit*f,truePromoDisc:(wc.truePromoDisc||0)*f,satchel:(wc.satchel||0)*f,discReclass:{serviceRecoveryCOGS:(wc.discReclass?.serviceRecoveryCOGS||0)*f,serviceRecoveryOrders:Math.round((wc.discReclass?.serviceRecoveryOrders||0)*f),marketingDisc:(wc.discReclass?.marketingDisc||0)*f,staffDisc:(wc.discReclass?.staffDisc||0)*f,promoDisc:(wc.discReclass?.promoDisc||0)*f}};};
+  const pRate=(wc,i)=>{const f=wFactors[i];return{netRevenue:wc.netRevenue*f,totalCOGS:wc.totalCOGS*f,grossProfit:wc.grossProfit*f,grossMargin:wc.grossMargin,netMargin:wc.netMargin,totalFreight:wc.totalFreight*f,totalCollabs:wc.totalCollabs*f,totalWages:wc.totalWages*f,totalOPEX:wc.totalOPEX*f,totalExpenses:wc.totalExpenses*f,netProfit:wc.netProfit*f,gross:wc.gross*f,truePromoDisc:(wc.truePromoDisc||0)*f,satchel:(wc.satchel||0)*f,discReclass:{serviceRecoveryCOGS:(wc.discReclass?.serviceRecoveryCOGS||0)*f,serviceRecoveryOrders:Math.round((wc.discReclass?.serviceRecoveryOrders||0)*f),marketingDisc:(wc.discReclass?.marketingDisc||0)*f,staffDisc:(wc.discReclass?.staffDisc||0)*f,promoDisc:(wc.discReclass?.promoDisc||0)*f}};};
   const rCalcsE=mc.weekCalcs.map((wc,i)=>pRate(wc,i));
   const rSumE=k=>rCalcsE.filter((_,i)=>wFactors[i]>0).reduce((s,c)=>s+(c[k]||0),0);
   const rNetRevE=rSumE("netRevenue"),rGrossProfitE=rSumE("grossProfit"),rTotalCOGSE=rSumE("totalCOGS");
@@ -767,102 +880,61 @@ function generateExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,labels,fa
   const gSales=weeks.reduce((s,w,i)=>s+n(w.revenue.gross_sales)*wFactors[i],0);
   const tDisc=weeks.reduce((s,w,i)=>s+n(w.revenue.discounts)*wFactors[i],0);
   const hasRange=factors&&factors.some(f=>f<1||f===0);
-  let o="=== P&L ANALYSIS - "+mLabel+(hasRange?" [DATE RANGE REPORT]":"")+" ===\nGenerated: "+new Date().toLocaleDateString("en-AU")+"\n\n";
+  const totalDR=rCalcsE.filter((_,i)=>wFactors[i]>0).reduce((s,c)=>({serviceRecoveryCOGS:s.serviceRecoveryCOGS+(c.discReclass?.serviceRecoveryCOGS||0),serviceRecoveryOrders:s.serviceRecoveryOrders+(c.discReclass?.serviceRecoveryOrders||0),marketingDisc:s.marketingDisc+(c.discReclass?.marketingDisc||0),staffDisc:s.staffDisc+(c.discReclass?.staffDisc||0),promoDisc:s.promoDisc+(c.discReclass?.promoDisc||0)}),{serviceRecoveryCOGS:0,serviceRecoveryOrders:0,marketingDisc:0,staffDisc:0,promoDisc:0});
+  const activeWeeks=weeks.filter((_,i)=>wFactors[i]>0);
+  let o="=== MONTHLY P&L — "+mLabel+(hasRange?" [DATE RANGE REPORT]":"")+" ===\nGenerated: "+new Date().toLocaleDateString("en-AU")+"\n\n";
   o+="--- "+(hasRange?"DATE RANGE":"MONTHLY")+" SUMMARY ---\n";
   o+="Gross Sales: "+fmt(gSales)+" | Total Discounts (all codes): "+fmt(tDisc)+" ("+pct(tDisc,gSales)+" of gross)\n";
   o+="Net Revenue (after true promo discounts only): "+fmt(rNetRevE)+"\n";
   o+="Total COGS (incl. service recovery): "+fmt(rTotalCOGSE)+" | Gross Profit: "+fmt(rGrossProfitE)+" ("+rGrossMarginE.toFixed(1)+"%)\n";
   o+="Freight: "+fmt(rTotalFreightE)+" | Collabs: "+fmt(rTotalCollabsE)+" | Wages (incl. staff discounts): "+fmt(rTotalWagesE)+" | OPEX (incl. influencer gifting): "+fmt(rTotalOPEXE)+"\n";
   o+="Total Expenses: "+fmt(rTotalExpensesE)+" | NET PROFIT: "+fmt(rNetProfitE)+" ("+rNetMarginE.toFixed(1)+"%)\n\n";
-
-  // Discount reclassification summary
-  const totalDR=rCalcsE.filter((_,i)=>wFactors[i]>0).reduce((s,c)=>({
-    serviceRecoveryCOGS:s.serviceRecoveryCOGS+(c.discReclass?.serviceRecoveryCOGS||0),
-    serviceRecoveryOrders:s.serviceRecoveryOrders+(c.discReclass?.serviceRecoveryOrders||0),
-    marketingDisc:s.marketingDisc+(c.discReclass?.marketingDisc||0),
-    staffDisc:s.staffDisc+(c.discReclass?.staffDisc||0),
-    promoDisc:s.promoDisc+(c.discReclass?.promoDisc||0),
-  }),{serviceRecoveryCOGS:0,serviceRecoveryOrders:0,marketingDisc:0,staffDisc:0,promoDisc:0});
   o+="--- DISCOUNT RECLASSIFICATION ---\n";
-  o+="Service Recovery (ops expense / COGS): "+fmt(totalDR.serviceRecoveryCOGS)+" | "+totalDR.serviceRecoveryOrders+" orders\n";
+  o+="Service Recovery → COGS: "+fmt(totalDR.serviceRecoveryCOGS)+" | "+totalDR.serviceRecoveryOrders+" orders | Annualised: "+fmt(totalDR.serviceRecoveryCOGS*12)+"\n";
   o+="Influencer / Marketing gifting: "+fmt(totalDR.marketingDisc)+"\n";
   o+="Staff discounts (staff benefit): "+fmt(totalDR.staffDisc)+"\n";
-  o+="True promotional discounts: "+fmt(totalDR.promoDisc)+" ("+pct(totalDR.promoDisc,gSales)+" of gross - this is the ONLY bucket affecting Net Revenue)\n\n";
-
+  o+="True promotional discounts: "+fmt(totalDR.promoDisc)+" ("+pct(totalDR.promoDisc,gSales)+" of gross — this is the ONLY bucket affecting Net Revenue)\n\n";
   weeks.forEach((w,i)=>{
-    if(wFactors[i]===0)return;
-    const f=wFactors[i];
-    const c=rCalcsE[i];
-    const wTargets=w.weekTargets||DEFAULT_TARGETS;
+    if(wFactors[i]===0)return;const f=wFactors[i];const c=rCalcsE[i];const wTargets=w.weekTargets||DEFAULT_TARGETS;
+    const satchelCount=n(w.cogs?.satchel_count)||0;const adSpend=n(w.opex?.meta_tiktok_ads||0);
+    const wGross=n(w.revenue?.gross_sales)*f;const wTier=wGross<24000?"A":wGross>=30000?"C":"B";
     o+="--- "+w.label+(f<1?" ("+Math.round(f*7)+"d pro-rated)":"")+" | "+w.dateRange+" ---\n";
-    o+="  Gross: "+fmt(n(w.revenue.gross_sales))+" | Total Discounts: -"+fmt(n(w.revenue.discounts))+" | True Promo Discount: -"+fmt(c.truePromoDisc)+" | Refunds: -"+fmt(n(w.revenue.refunds))+" | ShipIncome: +"+fmt(n(w.revenue.shipping_income))+" | PayPal: -"+fmt(n(w.revenue.paypal_fees))+" => NET: "+fmt(c.netRevenue)+"\n";
+    o+="  Gross: "+fmt(n(w.revenue.gross_sales))+" | Tier: "+wTier+" | True Promo Disc: -"+fmt(c.truePromoDisc)+" | Refunds: -"+fmt(n(w.revenue.refunds))+" | ShipIncome: +"+fmt(n(w.revenue.shipping_income))+" | PayPal: -"+fmt(n(w.revenue.paypal_fees))+" => NET: "+fmt(c.netRevenue)+"\n";
     o+="  COGS: MfgProduct "+fmt(n(w.cogs.manufacturing_product))+" | Inbound "+fmt(n(w.cogs.manufacturing_shipping))+" | Satchels "+n(w.cogs.satchel_count)+"@$"+(w.cogs.satchel_cost_each||fixed?.satchelCostDefault||"0.85")+"="+fmt(c.satchel)+" | ServiceRecovery "+fmt(c.discReclass.serviceRecoveryCOGS)+" => TOTAL: "+fmt(c.totalCOGS)+" | GP: "+fmt(c.grossProfit)+" ("+c.grossMargin.toFixed(1)+"%)\n";
     const fLines=keys.filter(k=>k.group==="freight").map(k=>{const v=w.opex?.[k.key]!==""?n(w.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);return k.label+": "+fmt(v);});
     o+="  Freight: "+fLines.join(" | ")+" => "+fmt(c.totalFreight)+"\n";
     const cLines=keys.filter(k=>k.group==="collabs").map(k=>{const v=w.opex?.[k.key]!==""?n(w.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);return k.label+": "+fmt(v);});
-    o+="  Collabs: "+cLines.join(" | ")+" | InfluencerGifting: "+fmt(c.discReclass.marketingDisc)+" => "+fmt(c.totalCollabs)+"\n";
+    o+="  Collabs: "+cLines.join(" | ")+" | InfluencerGifting: "+fmt(c.discReclass.marketingDisc)+" => "+fmt(c.totalCollabs)+(adSpend>0?" | Ads: "+fmt(adSpend)+" (ROAS: "+(c.netRevenue>0?(c.netRevenue/adSpend).toFixed(2):0)+"x, Tier "+wTier+" cap: $"+(wTier==="A"?"6,570":wTier==="C"?"11,169":"9,330")+")":"")+"\n";
     const wLines=wDepts.flatMap(d=>d.subs.map(s=>s.label+": "+fmt(n(w.wages?.[s.key]||0))));
     o+="  Wages: "+wLines.join(" | ")+" | StaffBenefits: "+fmt(c.discReclass.staffDisc)+" => "+fmt(c.totalWages)+"\n";
     const gLines=keys.filter(k=>k.group==="general").map(k=>{const v=w.opex?.[k.key]!==""?n(w.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);return v>0?k.label+": "+fmt(v):null;}).filter(Boolean);
     o+="  OPEX: "+(gLines.join(" | ")||"none")+" => "+fmt(c.totalOPEX)+"\n";
     o+="  NET PROFIT: "+fmt(c.netProfit)+" ("+c.netMargin.toFixed(1)+"%)"+(w.notes?" | Notes: "+w.notes:"")+"\n";
-    // Per-week alerts as action items
     const wAlerts=generateAlerts(w,c.netRevenue,c.discReclass||{},n(w.revenue.gross_sales),wTargets);
-    if(wAlerts.length){o+="  ACTIONS REQUIRED:\n";wAlerts.forEach(a=>{o+="  "+a.icon+" "+a.title+": "+a.action+"\n";});}
+    if(wAlerts.length){o+="  ACTIONS REQUIRED:\n";wAlerts.forEach(a=>{o+="  "+a.title+": "+a.action+"\n";});}
     o+="\n";
   });
-
-  if(extras&&mc.extraOpex>0){
-    o+="--- MONTHLY ADJUSTMENTS ---\n";
-    keys.forEach(({key,label})=>{if(n(extras.opex?.[key])>0)o+="  "+label+": "+fmt(n(extras.opex[key]))+"\n";});
-    o+="  Extra OPEX Total: "+fmt(mc.extraOpex)+"\n\n";
-  }
-  if(staff&&staff.length>0){
-    o+="--- STAFF ROSTER ---\n";
-    staff.forEach(s=>{const wc=n(s.hourlyRate)*n(s.hoursPerWeek);o+="  "+s.name+" | "+s.type+" | $"+n(s.hourlyRate).toFixed(2)+"/hr | "+n(s.hoursPerWeek)+"hrs/wk | Weekly cost: "+fmt(wc)+"\n";});
-    const total=staff.reduce((s,m)=>s+n(m.hourlyRate)*n(m.hoursPerWeek),0);
-    o+="  Budgeted: "+fmt(total)+" | Actual: "+fmt(mc.totalWages)+" | Variance: "+fmt(mc.totalWages-total)+"\n\n";
-  }
-  // Product margin section — use month-level data passed in directly
+  if(extras&&mc.extraOpex>0){o+="--- MONTHLY ADJUSTMENTS ---\n";keys.forEach(({key,label})=>{if(n(extras.opex?.[key])>0)o+="  "+label+": "+fmt(n(extras.opex[key]))+"\n";});o+="  Extra OPEX Total: "+fmt(mc.extraOpex)+"\n\n";}
+  if(staff&&staff.length>0){o+="--- STAFF ROSTER ---\n";staff.forEach(s=>{const wc=n(s.hourlyRate)*n(s.hoursPerWeek);o+="  "+s.name+" | "+s.type+" | $"+n(s.hourlyRate).toFixed(2)+"/hr | "+n(s.hoursPerWeek)+"hrs/wk | Weekly cost: "+fmt(wc)+"\n";});const total=staff.reduce((s,m)=>s+n(m.hourlyRate)*n(m.hoursPerWeek),0);o+="  Budgeted: "+fmt(total)+" | Actual: "+fmt(mc.totalWages)+" | Variance: "+fmt(mc.totalWages-total)+"\n\n";}
   const productList=(productMarginData||[]).slice().sort((a,b)=>b.netSales-a.netSales);
-  if(productList.length>0){
-    const gmTarget=weeks[0]?.weekTargets?.gross_margin_target||55;
-    o+="--- PRODUCT MARGIN ANALYSIS ---\n";
-    productList.forEach(p=>{
-      const m=p.netSales>0?(p.grossProfit/p.netSales)*100:0;
-      const dr=p.gross>0?(p.discounts/p.gross)*100:0;
-      const flag=p.netSales<=0&&p.gross>0?"[GIFTED/ZEROED]":m<gmTarget?"[BELOW TARGET "+gmTarget+"%]":"";
-      o+="  "+p.product+": "+Math.round(p.units)+"u | Gross "+fmt(p.gross)+" | Disc "+dr.toFixed(1)+"% | Net "+fmt(p.netSales)+" | COGS "+fmt(p.totalCogs)+" | GP "+fmt(p.grossProfit)+" | Margin "+m.toFixed(1)+"%"+(flag?" "+flag:"")+"\n";
-    });
-    const totalPNet=productList.reduce((s,p)=>s+p.netSales,0);
-    const totalPGP=productList.reduce((s,p)=>s+p.grossProfit,0);
-    const blended=totalPNet>0?(totalPGP/totalPNet)*100:0;
-    const belowTarget=productList.filter(p=>p.netSales>0&&(p.grossProfit/p.netSales)*100<gmTarget);
-    const gifted=productList.filter(p=>p.netSales<=0&&p.gross>0);
-    o+="  Blended product gross margin: "+blended.toFixed(1)+"% | Target: "+gmTarget+"%\n";
-    o+="  Products below target: "+belowTarget.map(p=>p.product).join(", ")+(belowTarget.length?"\n":"")+"\n";
-    if(gifted.length)o+="  Fully gifted/zeroed (100% discounted): "+gifted.map(p=>p.product+"("+fmt(p.gross)+")").join(", ")+"\n";
-    o+="\n";
-  }
-
-
-  o+="=== END DATA ===\n\nYou are the COO's senior financial advisor. Produce a comprehensive P&L analysis in full paragraphs (NOT dot points).\n\n";
-  o+="1. PROFITABILITY VERDICT - Net margin vs benchmarks (10-15% net, 40-65% gross). Growth/maintenance/risk posture.\n\n";
-  o+="2. DISCOUNT RECLASSIFICATION IMPACT - The total discounts figure includes service recovery (ops cost), influencer gifting (marketing), and staff benefits. Explain how reclassifying these changes the true picture of both revenue quality and operational efficiency. What is the real promotional discount rate? What is the service recovery rate and what does it signal about product quality?\n\n";
-  o+="3. WEEK-ON-WEEK TRENDS - Trajectory, patterns, outliers.\n\n";
-  o+="4. MONEY BLEED - Every cost category, dollar amount and % of net revenue. Ranked by impact.\n\n";
-  o+="5. REVENUE QUALITY - True promo discount rate, refund rate, net revenue yield per gross dollar.\n\n";
-  o+="6. SERVICE RECOVERY DEEP DIVE - Cost per service recovery order. What product/process failure is driving this? Annualise the cost.\n\n";
-  o+="7. COGS AND GROSS MARGIN - Manufacturing efficiency. Volume scenarios.\n\n";
-  o+="8. FREIGHT EFFICIENCY - Carrier split, net shipping subsidy, recovery strategy.\n\n";
-  o+="9. COLLAB AND INFLUENCER ROI - Total spend including gifting. Minimum ROAS thresholds.\n\n";
-  o+="10. WAGES BY DEPARTMENT - Wages as % of net revenue. Efficiency and sustainability.\n\n";
-  o+="11. OPEX LINE BY LINE - Justify, benchmark, renegotiate. Model 20% revenue decline.\n\n";
-  o+="12. PRODUCT MARGIN ANALYSIS - If product data is provided: rank products by contribution margin. Which products are pulling the blended margin down? Which are fully gifted/zeroed and what is the total unrecovered COGS? Which discount codes are pushing products below target margin? Recommend pricing or discount adjustments.\n\n";
-  o+="13. TOP 5 ACTIONS - Exact dollar improvement, mechanism, timeline, trade-off.\n\n";
-  o+="13. MARGIN EXPANSION - Structural changes over 90 days.\n\n";
-  o+="14. NEXT MONTH TARGETS - Exact dollar targets. Break-even calculation.\n\n";
-  o+="15. NEXT WEEK STAFFING PLAN - Based on roster vs actual wages variance, recommend exact hours per person for next week to hit a 15% net margin at current revenue run rate.\n\nUse exact figures. Flag anomalies. Make it worth reading.";
+  if(productList.length>0){const gmTarget=weeks[0]?.weekTargets?.gross_margin_target||55;o+="--- PRODUCT MARGIN ANALYSIS ---\n";productList.forEach(p=>{const m=p.netSales>0?(p.grossProfit/p.netSales)*100:0;const dr=p.gross>0?(p.discounts/p.gross)*100:0;const flag=p.netSales<=0&&p.gross>0?"[GIFTED/ZEROED]":m<gmTarget?"[BELOW TARGET "+gmTarget+"%]":"";o+="  "+p.product+": "+Math.round(p.units)+"u | Gross "+fmt(p.gross)+" | Disc "+dr.toFixed(1)+"% | Net "+fmt(p.netSales)+" | COGS "+fmt(p.totalCogs)+" | GP "+fmt(p.grossProfit)+" | Margin "+m.toFixed(1)+"%"+(flag?" "+flag:"")+"\n";});const totalPNet=productList.reduce((s,p)=>s+p.netSales,0);const totalPGP=productList.reduce((s,p)=>s+p.grossProfit,0);const blended=totalPNet>0?(totalPGP/totalPNet)*100:0;const belowTarget=productList.filter(p=>p.netSales>0&&(p.grossProfit/p.netSales)*100<(weeks[0]?.weekTargets?.gross_margin_target||55));o+="  Blended product gross margin: "+blended.toFixed(1)+"% | Target: "+(weeks[0]?.weekTargets?.gross_margin_target||55)+"%\n";if(belowTarget.length)o+="  Products below target: "+belowTarget.map(p=>p.product).join(", ")+"\n";o+="\n";}
+  o+="=== END DATA ===\n\nYou are a COO-level financial advisor reviewing a FULL MONTH of P&L data. Your job is to analyse trends, determine whether week-to-week operational changes worked, and set the strategic direction for next month. Use exact figures. Cite weeks by label when comparing them.\n\n";
+  o+="1. MONTHLY VERDICT — 2–3 sentences: good or bad month? Trajectory improving or deteriorating week to week? Single factor with most impact on net profit?\n\n";
+  o+="2. WEEK-ON-WEEK TREND ANALYSIS — Walk through net revenue, gross margin, and net margin across all "+activeWeeks.length+" weeks. Identify inflection points. If operator notes describe mid-month changes, did they show up in the following week\'s numbers? Be specific about cause and effect.\n\n";
+  o+="3. REVENUE QUALITY TREND — Net yield consistency week to week. Which weeks had degraded yield? Total true promotional discount for the month as % of gross. Sustainable?\n\n";
+  o+="4. COGS TREND AND SERVICE RECOVERY — Manufacturing proportionate to volume? Any week where SR blew out? Total monthly SR cost, cost per incident, 12-month annualised. SR rate trending up or down?\n\n";
+  o+="5. GROSS MARGIN TRAJECTORY — Did margin improve? If recovery: structural or one-off? If deterioration: which week broke and why?\n\n";
+  o+="6. OPEX EFFICIENCY — Total OPEX % by week. Fixed bleed vs variable. Top 3 OPEX lines by monthly total — is each proportionate?\n\n";
+  o+="7. FREIGHT AND SHIPPING — Monthly net shipping subsidy. Growing or shrinking? At what monthly revenue does freight % become acceptable? What threshold recovers 80% of outbound cost?\n\n";
+  o+="8. WAGES EFFICIENCY — Monthly wages % trend. Monthly variance vs roster budget. Which department drove over/underage? Maximum sustainable weekly wages bill at this month\'s average revenue run rate.\n\n";
+  o+="9. AD SPEND & TIER ANALYSIS (MONTH VIEW) — For each week, state its revenue tier (A <$24K, B $24–$30K, C >$30K). Was spend within tier cap (A: $6,570, B: $9,330, C: $11,169)? Was ROAS above floor (A: 3.3x, B: 3.0x, C: 2.9x)? Which weeks had unjustified spend? Total monthly ad spend, blended ROAS, dollar cost of below-floor weeks. Is there a visible correlation between this week\'s spend and next week\'s revenue — is it working? Recommend next month\'s weekly ad spend approach by tier.\n\n";
+  o+="10. COLLABS AND INFLUENCER ROI — Total monthly collab spend including gifted product. Minimum revenue required at 3x ROAS. Visible revenue lift in high-collab weeks? Which collabs are ROI-positive with evidence? Which should be paused next month?\n\n";
+  o+="11. ROSTER EFFICIENCY TREND — Wages % across all weeks. Weeks where wages over-indexed vs revenue? Based on this month\'s actual revenue distribution, ideal roster structure: fixed headcount for base ops vs flex/casual for volume spikes. Maximum weekly wages bill for each tier (A/B/C) to stay under wages % target. Department-level recommendations for next month.\n\n";
+  o+="12. ORDER VOLUME & LOGISTICS TREND — Trace order count week by week where available. Volume growing, flat, or declining relative to gross? Average order value trend. SR orders across multiple weeks: increasing rate suggesting systemic issue requiring escalation? Recommend next month\'s logistics staffing and satchel stock based on this month\'s trend.\n\n";
+  o+="13. PRODUCT MARGIN — If product data provided: which products drove most gross profit? Which dragged blended margin below target? Dollar cost of keeping below-margin products at current discount rates.\n\n";
+  o+="14. TOP 5 ACTIONS — Exact dollar improvement, mechanism, timeline, trade-off.\n\n";
+  o+="15. MARGIN EXPANSION — Structural changes over 90 days.\n\n";
+  o+="16. NEXT MONTH TARGETS — Exact dollar targets for gross sales, net revenue, COGS, OPEX, wages, net profit. Break-even weekly revenue. Weekly revenue required to hit net margin target. Single change with highest margin leverage requiring no revenue increase.\n\nMake the trend analysis the centrepiece. This is a month review, not a snapshot.";
   return o;
 }
 
@@ -4795,9 +4867,16 @@ function App(){
     autoSave(monthData,fixed,ns);
   };
 
+  const handleWeeklyExport=useCallback(()=>{
+    const week=curWeeks[activeWeek];if(!week)return;
+    const pm=curEntry?.productMarginData||[];
+    navigator.clipboard.writeText(generateWeeklyExport(week,fixed,opexKeys,wageDepts,staff,labels,pm));
+    setCopied(true);setTimeout(()=>setCopied(false),3000);
+  },[curWeeks,activeWeek,fixed,opexKeys,wageDepts,staff,labels,curEntry]);
+
   const handleExport=(weeksData=curWeeks,extras=curExtras,label=selMonth?.label,factors=null)=>{
     const pm=curEntry?.productMarginData||[];
-    navigator.clipboard.writeText(generateExport(weeksData,fixed,extras,label,opexKeys,wageDepts,staff,labels,factors,pm));
+    navigator.clipboard.writeText(generateMonthlyExport(weeksData,fixed,extras,label,opexKeys,wageDepts,staff,labels,factors,pm));
     setCopied(true);setTimeout(()=>setCopied(false),3000);
   };
   const handleSaveMonthData=async md=>{setMonthData(md);await saveAll(md,fixed,settings);};
@@ -4815,12 +4894,12 @@ function App(){
     const handler=(e)=>{
       if((e.ctrlKey||e.metaKey)&&e.key==="e"&&tab==="input"){
         e.preventDefault();
-        handleExport();
+        handleWeeklyExport();
       }
     };
     window.addEventListener("keydown",handler);
     return()=>window.removeEventListener("keydown",handler);
-  },[tab,curWeeks,curExtras,selMonth]);
+  },[tab,curWeeks,activeWeek,fixed,opexKeys,wageDepts,staff,labels,curEntry]);
 
   if(!authed)return(
     <ThemeContext.Provider value={theme}>
@@ -4920,8 +4999,8 @@ function App(){
                 <div style={{fontFamily:ff,fontSize:11,color:MU,letterSpacing:1}}>
                   <E value={selMonth?.label+" — "+(labels.header_subtitle||"weeks auto-dated Mon-Sun")} onSave={v=>labels._save("header_subtitle",v.includes("—")?v.split("—").slice(1).join("—").trim():v)} style={{fontFamily:ff,fontSize:11,color:MU}}/>
                 </div>
-                <button onClick={()=>handleExport()}
-                  title="Export for Claude analysis (Ctrl+E)"
+                <button onClick={handleWeeklyExport}
+                  title="Weekly export for Claude analysis (Ctrl+E)"
                   style={{padding:"9px 16px",background:copied?A:"transparent",border:"1px solid "+A,color:copied?"#ffffff":A,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
                   <E value={labels.btn_generate_export} onSave={v=>labels._save("btn_generate_export",v)} style={{fontFamily:ff,fontSize:11,color:copied?"#ffffff":A}}/>{copied?" ✓":""}
                 </button>
