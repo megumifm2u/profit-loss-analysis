@@ -3772,6 +3772,58 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts,rosterSaves
       <SH>All Saved Months ({allKeys.length})</SH>
       {allKeys.map(key=>{
         const md=monthData[key]||{};
+        // Margin Analysis Report card
+        if(md.type==="margin_analysis"&&md.marginReport){
+          const r=md.marginReport;
+          const isOpen=expanded===key;
+          return(
+            <div key={key} style={{border:"1px solid "+A+"55",borderRadius:radius+2,marginBottom:10,overflow:"visible"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",background:isOpen?S2:"transparent",borderRadius:isOpen?(radius+2)+"px "+(radius+2)+"px 0 0":radius+2+"px"}}>
+                <div onClick={()=>setExpanded(isOpen?null:key)} style={{flex:1,cursor:"pointer"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontFamily:ff,fontSize:9,color:A,background:A+"18",border:"1px solid "+A+"44",padding:"2px 8px",borderRadius:10,letterSpacing:1,textTransform:"uppercase"}}>Margin Analysis</span>
+                    <span style={{fontFamily:ff,fontSize:14,color:TX}}>{md.label||key}</span>
+                  </div>
+                  <div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:4}}>
+                    {"Target: "+r.targetMargin+"% · Products: "+(r.shippingProducts?.length||0)+" · Saved: "+(md.lastSaved||"-")}
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <button onClick={()=>{navigator.clipboard.writeText(r.exportText||"");setCopied(key);setTimeout(()=>setCopied(null),3000);}}
+                    style={{padding:"6px 12px",background:copied===key?A:"transparent",border:"1px solid "+A,color:copied===key?"#ffffff":A,fontFamily:ff,fontSize:10,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
+                    {copied===key?"Copied!":"Copy Export"}
+                  </button>
+                  <button onClick={()=>{if(window.confirm("Delete this report?"))deleteMonth(key);}}
+                    style={{background:"transparent",border:"1px solid "+BR,color:MU,padding:"5px 10px",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius}}>x</button>
+                  <button onClick={()=>setExpanded(isOpen?null:key)} style={{background:"transparent",border:"none",color:MU,fontSize:20,cursor:"pointer",lineHeight:1}}>{isOpen?"-":"+"}</button>
+                </div>
+              </div>
+              {isOpen&&(
+                <div style={{padding:"16px 18px",borderTop:"1px solid "+BR,background:S}}>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8,marginBottom:14}}>
+                    {[
+                      {l:"Target Margin",v:r.targetMargin+"%"},
+                      {l:"30-day Ad Spend",v:"$"+parseFloat(r.adSpend30||0).toLocaleString("en-AU",{maximumFractionDigits:0})},
+                      {l:"Monthly Orders",v:String(r.monthlyOrders||"-")},
+                      {l:"Products",v:String(r.shippingProducts?.length||0)},
+                    ].map(function(x){return(
+                      <div key={x.l} style={{background:S2,border:"1px solid "+BR,borderRadius:radius,padding:"8px 10px"}}>
+                        <div style={{fontFamily:ff,fontSize:8,color:MU,textTransform:"uppercase",letterSpacing:0.5,marginBottom:2}}>{x.l}</div>
+                        <div style={{fontFamily:ff,fontSize:13,color:A,fontWeight:"bold"}}>{x.v}</div>
+                      </div>
+                    );})}
+                  </div>
+                  {r.exportText&&(
+                    <div>
+                      <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Export preview</div>
+                      <pre style={{fontFamily:"monospace",fontSize:10,color:MU,background:S2,border:"1px solid "+BR,borderRadius:radius,padding:"12px 14px",whiteSpace:"pre-wrap",lineHeight:1.6,maxHeight:200,overflow:"auto"}}>{r.exportText.slice(0,600)+"..."}</pre>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        }
         const weeks=editing===key?editWeeks:(md.weeks||[]);
         const extras=editing===key?editExtras:(md.extras||emptyExtras(keys));
         const mc=calcMonth(weeks,fixed,extras,keys,wDepts);
@@ -3981,19 +4033,636 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts,rosterSaves
 }
 
 // ─── Targets Page ─────────────────────────────────────────────────────────────
-// ─── Margin Analysis Page ─────────────────────────────────────────────────────
-function MarginAnalysisPage({productMarginData,productCatalogue,onProductMarginUpdate,onProductCatalogueUpdate,targetMargin,satchelCost}){
-  return(
+// ─── Margin Analysis Page (v2) ────────────────────────────────────────────────
+// Shipping data
+const DOM_SHIPPING={250:[5.82,7.76,9.22],500:[6.69,8.92,10.59],1000:[9.15,12.20,14.49]};
+const INTL_SHIPPING={
+  250: [10.60,15.46,17.28,21.31,16.46,16.96,22.69,23.38,28.35],
+  500: [12.77,20.15,22.48,26.66,21.45,22.10,28.38,29.24,36.04],
+  1000:[17.16,29.57,32.71,37.43,31.47,32.43,39.85,41.06,51.43],
+  1500:[21.55,38.98,43.05,48.17,41.50,42.76,51.27,52.83,66.77],
+  2000:[25.94,48.40,53.36,58.90,51.52,53.08,62.70,64.60,82.15],
+};
+const INTL_ZONE_NAMES=["NZ","China","USA & Canada","UK & Ireland","Rest of Asia","Pacific Islands","Major Europe","Rest of World 1","Rest of World 2"];
+const DOM_ZONE_NAMES=["AU Zone 1 (metro)","AU Zone 2 (state)","AU Zone 3 (remote/WA)"];
+const WEIGHT_OPTS=[{v:250,l:"250g"},{v:500,l:"500g"},{v:1000,l:"1kg"},{v:1500,l:"1.5kg"},{v:2000,l:"2kg"}];
+
+// Default product catalogue used in the shipping zone analysis
+const DEFAULT_SHIPPING_PRODUCTS=[
+  {name:"Dolly Mini Dress (Steel Boned)",price:199,cogs:40},
+  {name:"Sirena Mini Dress (Steel Boned)",price:199,cogs:45},
+  {name:"Misa Mini Dress (Steel Boned)",price:199,cogs:40},
+  {name:"Raven's Embrace",price:250,cogs:55},
+  {name:"Ravencross Dress (Black)",price:199,cogs:40},
+  {name:"Ravencross Dress (Vampiress)",price:169,cogs:40},
+  {name:"Ravencross Top (Final Restock)",price:89,cogs:20},
+  {name:"Ravencross Pants (Final Restock)",price:89,cogs:20},
+  {name:"Milkmaid Dress - Maxi (Blood)",price:150,cogs:43},
+  {name:"Milkmaid Dress - Maxi (Ivory)",price:150,cogs:43},
+  {name:"Milkmaid Dress - Maxi (Ebony)",price:150,cogs:43},
+  {name:"Milkmaid Dress - Mini (Blood)",price:120,cogs:39},
+  {name:"Milkmaid Dress - Mini (Ivory)",price:120,cogs:39},
+  {name:"Milkmaid Dress - Mini (Ebony)",price:120,cogs:39},
+  {name:"Elvira Vampiress",price:150,cogs:30},
+  {name:"Elvira Dress",price:149,cogs:30},
+  {name:"Babydoll (Vampiress)",price:89,cogs:20},
+  {name:"Babydoll (Princess)",price:89,cogs:20},
+  {name:"Cascadia (Ivory)",price:120,cogs:40},
+  {name:"Cascadia (Ebony)",price:160,cogs:40},
+  {name:"Cascadia (Purple)",price:160,cogs:40},
+  {name:"Cascadia Lace Bolero",price:85,cogs:10},
+  {name:"Pierced Afghan Coat",price:250,cogs:55},
+  {name:"Steel-Boned Corset (Blood)",price:90,cogs:30},
+  {name:"Steel-Boned Corset (Ebony)",price:90,cogs:30},
+  {name:"Devil Top",price:49,cogs:30},
+  {name:"Morticia Dress",price:150,cogs:32},
+];
+
+function MarginAnalysisPage({productMarginData,productCatalogue,onProductMarginUpdate,onProductCatalogueUpdate,targetMargin,satchelCost,onSaveReport,monthLabel}){
+  const {S,S2,BR,A,MU,TX,GR,RD,YL,BG,ff,radius}=useTheme();
+  const [activeTab,setActiveTab]=useState("product");
+  const [exportCopied,setExportCopied]=useState(false);
+  const [saveMsg,setSaveMsg]=useState("");
+
+  // ── Shared inputs ──
+  const [targetM,setTargetM]=useState(targetMargin||25);
+  const [adSpend30,setAdSpend30]=useState("27698.79");
+  const [monthlyOrders,setMonthlyOrders]=useState("300");
+
+  // ── Shipping zone tab state ──
+  const [selWeight,setSelWeight]=useState(500);
+  const [selProduct,setSelProduct]=useState(DEFAULT_SHIPPING_PRODUCTS[0].name);
+  const [zoneTab,setZoneTab]=useState("overview"); // overview | domestic | international | recommended
+  const [recWeight,setRecWeight]=useState(500);
+
+  // ── Product catalogue for shipping analysis (editable) ──
+  const cat=productCatalogue||{};
+  const shippingProducts=(cat.__shippingProducts__||DEFAULT_SHIPPING_PRODUCTS).map(p=>({...p}));
+  const saveShippingProducts=arr=>onProductCatalogueUpdate({...cat,__shippingProducts__:arr});
+
+  // ── Product-level editing ──
+  const [editingProduct,setEditingProduct]=useState(null); // index
+  const [editDraft,setEditDraft]=useState({});
+
+  const adPO=parseFloat(adSpend30)/Math.max(1,parseFloat(monthlyOrders)||300);
+
+  const fmtD2=v=>(v<0?"-":"")+"$"+Math.abs(v).toFixed(2);
+  const fmtS2=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:0,maximumFractionDigits:0});
+  const pctColor=(p,t)=>p>=t?GR:p>=t*0.6?YL:RD;
+  const pillLabel=p=>p<0?"LOSS":p<15?"LOW":p<25?"WARN":"OK";
+  const pillC=p=>p<0?RD:p<15?YL:p<25?YL:GR;
+
+  // ── Zone margin calc ──
+  function zoneMargin(price,cogs,ship,adP){return price>0?((price-cogs-ship-adP)/price)*100:0;}
+  function minPrice(cogs,ship,adP,margin){return (cogs+ship+adP)/(1-margin/100);}
+
+  // ── Build big export text ──
+  function buildExport(){
+    const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
+    const adP=adPO;
+    const t=targetM;
+    let o="=== MARGIN & SHIPPING ZONE ANALYSIS ===\n";
+    o+="Generated: "+new Date().toLocaleDateString("en-AU")+"\n";
+    o+="Target margin: "+t+"% | Ad spend/order: "+fmt(adP)+" (30-day: "+fmt(parseFloat(adSpend30))+", est. "+monthlyOrders+" orders/month)\n\n";
+
+    // Product overview
+    o+="--- PRODUCT OVERVIEW ---\n";
+    shippingProducts.forEach(p=>{
+      const gross=p.price-p.cogs;
+      const afterAd=gross-adP;
+      const mPct=p.price>0?(afterAd/p.price)*100:0;
+      const flag=mPct<0?"[LOSS]":mPct<t?"[BELOW TARGET]":"[OK]";
+      o+="  "+p.name+": Price $"+p.price+" | COGS $"+p.cogs+" | After COGS+Ad: "+fmt(afterAd)+" ("+mPct.toFixed(1)+"%) "+flag+"\n";
+    });
+    o+="\n";
+
+    // Domestic zone matrix
+    o+="--- DOMESTIC ZONE ANALYSIS (per product, 500g weight) ---\n";
+    o+="Zone | Shipping | Net after ship+COGS+ad | Margin | Min price for "+t+"%\n";
+    DOM_ZONE_NAMES.forEach((zn,zi)=>{
+      const ship=DOM_SHIPPING[500][zi];
+      o+="\n"+zn+" (shipping: "+fmt(ship)+"):\n";
+      shippingProducts.slice(0,10).forEach(p=>{
+        const m=zoneMargin(p.price,p.cogs,ship,adP);
+        const mp=minPrice(p.cogs,ship,adP,t);
+        const inc=((mp-p.price)/p.price)*100;
+        o+="  "+p.name+": margin "+m.toFixed(1)+"% | need $"+mp.toFixed(0)+(inc>0?" (+"+inc.toFixed(0)+"%)":"")+"\n";
+      });
+    });
+    o+="\n";
+
+    // International zone matrix
+    o+="--- INTERNATIONAL ZONE ANALYSIS (500g) ---\n";
+    INTL_ZONE_NAMES.forEach((zn,zi)=>{
+      const ship=INTL_SHIPPING[500][zi];
+      o+="\n"+zn+" (shipping: "+fmt(ship)+"):\n";
+      shippingProducts.forEach(p=>{
+        const m=zoneMargin(p.price,p.cogs,ship,adP);
+        const mp=minPrice(p.cogs,ship,adP,t);
+        const inc=((mp-p.price)/p.price)*100;
+        const flag=m<0?"[LOSS — ¡ACTION REQUIRED!]":m<t?"[below target]":"";
+        o+="  "+p.name+": margin "+m.toFixed(1)+"% | need $"+mp.toFixed(0)+(inc>0?" (+"+inc.toFixed(0)+"%)":"")+flag+"\n";
+      });
+    });
+    o+="\n";
+
+    // Recommended price table
+    o+="--- RECOMMENDED MINIMUM PRICES ("+t+"% margin after COGS+shipping+ad spend) ---\n";
+    o+="Product | Price | AU-Z1 | AU-Z2 | AU-Z3 | NZ | China | USA/CA | UK/IE | RestAsia | Pacific | Europe | RoW1 | RoW2\n";
+    const domShip500=DOM_SHIPPING[500];
+    const intlShip500=INTL_SHIPPING[500];
+    shippingProducts.forEach(p=>{
+      const cells=[...domShip500,...intlShip500].map(s=>{
+        const mp=minPrice(p.cogs,s,adP,t);
+        const inc=((mp-p.price)/p.price)*100;
+        return "$"+mp.toFixed(0)+(inc>0?"(+"+inc.toFixed(0)+"%)":"✓");
+      });
+      o+="  "+p.name+" ($"+p.price+"): "+cells.join(" | ")+"\n";
+    });
+    o+="\n";
+
+    // Shopify product margin data if available
+    const pm=productMarginData||[];
+    if(pm.length){
+      const totalNet=pm.reduce((s,p)=>s+p.netSales,0);
+      const totalGP=pm.reduce((s,p)=>s+p.grossProfit,0);
+      const blended=totalNet>0?(totalGP/totalNet)*100:0;
+      o+="--- SHOPIFY PRODUCT PERFORMANCE ---\n";
+      o+="Blended actual GM: "+blended.toFixed(1)+"% | Target: "+t+"%\n";
+      pm.slice().sort((a,b)=>b.netSales-a.netSales).forEach(p=>{
+        const m=p.netSales>0?(p.grossProfit/p.netSales)*100:0;
+        const flag=p.netSales<=0&&p.gross>0?"[GIFTED]":m<t?"[BELOW "+t+"%]":"";
+        o+="  "+p.product+": "+p.units+"u | Net "+fmt(p.netSales)+" | Disc "+p.discRate.toFixed(1)+"% | GM "+m.toFixed(1)+"% "+flag+"\n";
+      });
+      o+="\n";
+    }
+
+    o+="=== END DATA ===\n\n";
+    o+="You are a senior pricing and profitability strategist. Analyse this full margin and shipping data for a fashion e-commerce brand selling across AU domestic and international zones.\n\n";
+    o+="1. MARGIN HEALTH BY ZONE — For each shipping zone (domestic and international), which products are underwater, marginal, and healthy? Name specific products and exact figures.\n\n";
+    o+="2. CRITICAL ZONE PROBLEMS — Which zones + products have negative or near-zero margin? What is the minimum price increase required and the dollar impact if applied?\n\n";
+    o+="3. SHIPPING STRATEGY — Should this brand: (a) charge shipping by zone, (b) flat rate by region, or (c) build zone surcharges into product price? Model the revenue impact of each approach.\n\n";
+    o+="4. AD SPEND VIABILITY BY ZONE — At $"+adP.toFixed(2)+"/order ad cost, which zones cannot absorb ad spend at current prices? Which need price floors adjusted?\n\n";
+    o+="5. INTERNATIONAL PRICING TIERS — Recommend a tiered international pricing structure (e.g. AU base, NZ+10%, USA+15%, UK+20% etc.) derived from actual shipping costs. Show exact recommended prices per zone for top 5 products by revenue.\n\n";
+    o+="6. PRODUCT-LEVEL ACTIONS — For any product with actual GM below "+t+"%, diagnose root cause (COGS too high, price too low, discounts, zone mix) and recommend exact corrective action with dollar impact.\n\n";
+    o+="7. DISCOUNT VIABILITY — Which products can support a 10/15/20% discount and still hit "+t+"% margin? Which cannot even at 0% discount in expensive shipping zones?\n\n";
+    o+="8. TOP 5 ACTIONS — Prioritised by dollar impact. Include specific price changes, zone surcharges, or product decisions. Timeline and expected margin improvement for each.\n\n";
+    o+="Use exact figures throughout. Be commercially direct. Do not hedge.";
+    return o;
+  }
+
+  function handleExport(){
+    const text=buildExport();
+    navigator.clipboard.writeText(text);
+    setExportCopied(true);
+    setTimeout(()=>setExportCopied(false),3000);
+  }
+
+  function handleSaveReport(){
+    if(!onSaveReport){setSaveMsg("Save not available");return;}
+    const report={
+      type:"margin_analysis",
+      label:"Margin & Shipping Analysis — "+(monthLabel||new Date().toLocaleDateString("en-AU")),
+      savedAt:new Date().toLocaleString("en-AU"),
+      targetMargin:targetM,
+      adSpend30,
+      monthlyOrders,
+      shippingProducts,
+      productMarginData:productMarginData||[],
+      exportText:buildExport(),
+    };
+    onSaveReport(report);
+    setSaveMsg("Saved to Reports ✓");
+    setTimeout(()=>setSaveMsg(""),3000);
+  }
+
+  // ── Input style ──
+  const inp={background:S2,border:"1px solid "+BR,color:TX,padding:"6px 10px",fontFamily:ff,fontSize:13,outline:"none",borderRadius:radius,width:"100%",boxSizing:"border-box"};
+  const tabBtn=(id,label)=>(
+    <button key={id} onClick={()=>setActiveTab(id)}
+      style={{padding:"9px 16px",background:"transparent",border:"none",borderBottom:activeTab===id?"2px solid "+A:"2px solid transparent",color:activeTab===id?A:MU,fontFamily:ff,fontSize:11,cursor:"pointer",marginBottom:-1,letterSpacing:0.5,whiteSpace:"nowrap"}}>
+      {label}
+    </button>
+  );
+
+  // ── Shared header/actions ──
+  const renderHeader=()=>(
+    <div style={{marginBottom:24}}>
+      {/* Global inputs row */}
+      <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+2,padding:"16px 20px",marginBottom:16}}>
+        <div style={{fontFamily:ff,fontSize:9,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:12}}>Analysis Inputs</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12}}>
+          <div>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,letterSpacing:0.7,textTransform:"uppercase",marginBottom:5}}>Target Margin %</div>
+            <input type="number" value={targetM} min={5} max={80} step={1} onChange={e=>setTargetM(parseFloat(e.target.value)||25)} style={inp}/>
+          </div>
+          <div>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,letterSpacing:0.7,textTransform:"uppercase",marginBottom:5}}>30-Day Ad Spend ($)</div>
+            <input type="number" value={adSpend30} onChange={e=>setAdSpend30(e.target.value)} style={inp} placeholder="27698.79"/>
+          </div>
+          <div>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,letterSpacing:0.7,textTransform:"uppercase",marginBottom:5}}>Est. Monthly Orders</div>
+            <input type="number" value={monthlyOrders} onChange={e=>setMonthlyOrders(e.target.value)} style={inp} placeholder="300"/>
+          </div>
+          <div>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,letterSpacing:0.7,textTransform:"uppercase",marginBottom:5}}>Ad Spend / Order</div>
+            <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius,padding:"6px 10px",fontFamily:ff,fontSize:13,color:A,fontWeight:"bold"}}>${adPO.toFixed(2)}</div>
+          </div>
+        </div>
+      </div>
+      {/* Action buttons */}
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+        <button onClick={handleExport}
+          style={{padding:"10px 20px",background:exportCopied?A:"transparent",border:"1px solid "+A,color:exportCopied?"#ffffff":A,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
+          {exportCopied?"✓ Copied — paste into Claude":"Generate Export for Claude"}
+        </button>
+        <button onClick={handleSaveReport}
+          style={{padding:"10px 20px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
+          Save to Reports
+        </button>
+        {saveMsg&&<span style={{fontFamily:ff,fontSize:11,color:GR}}>{saveMsg}</span>}
+      </div>
+    </div>
+  );
+
+  // ── TAB: Product-level margin from Shopify ──
+  const renderProductTab=()=>(
     <div>
       <ProductMarginImport
         products={productMarginData||[]}
         catalogue={productCatalogue||{}}
         onUpdate={onProductMarginUpdate}
         onCatalogueUpdate={onProductCatalogueUpdate}
-        targetMargin={targetMargin||55}
+        targetMargin={targetM}
         satchelCost={satchelCost}
         fullPage
       />
+    </div>
+  );
+
+  // ── TAB: Zone overview ──
+  const renderZoneOverview=()=>{
+    const adP=adPO;
+    const netMarginPct=(price,cogs,ship)=>price>0?((price-cogs-ship-adP)/price)*100:0;
+    // Summary per product: best and worst zones
+    return(
+      <div>
+        <div style={{fontFamily:ff,fontSize:10,color:MU,marginBottom:16,lineHeight:1.7}}>
+          Net margin per product across all zones, after COGS + shipping + ad spend. Sorted worst to best. Use the International and Domestic tabs for zone-by-zone detail.
+        </div>
+        {/* Summary stats */}
+        {(()=>{
+          const allMargins=shippingProducts.flatMap(p=>
+            [...DOM_SHIPPING[500],...INTL_SHIPPING[500]].map(s=>netMarginPct(p.price,p.cogs,s))
+          );
+          const losing=allMargins.filter(m=>m<0).length;
+          const total=allMargins.length;
+          const avgM=allMargins.reduce((s,m)=>s+m,0)/total;
+          return(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:10,marginBottom:20}}>
+              {[
+                {l:"Products",v:String(shippingProducts.length),c:A},
+                {l:"Zones modelled",v:"12",c:MU},
+                {l:"Avg margin (all zones)",v:avgM.toFixed(1)+"%",c:pctColor(avgM,targetM)},
+                {l:"Zone/product combos losing money",v:String(losing)+" / "+String(total),c:losing>0?RD:GR},
+                {l:"Ad cost / order",v:"$"+adP.toFixed(2),c:MU},
+              ].map(({l,v,c})=>(
+                <div key={l} style={{background:S,border:"1px solid "+BR,borderRadius:radius+2,padding:"12px 14px",borderTop:"2px solid "+c}}>
+                  <div style={{fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:4}}>{l}</div>
+                  <div style={{fontFamily:ff,fontSize:20,color:c,fontWeight:"bold"}}>{v}</div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+        {/* Product rows sorted by worst intl margin */}
+        {shippingProducts.slice().sort((a,b)=>{
+          const worstM=p=>Math.min(...INTL_SHIPPING[500].map(s=>netMarginPct(p.price,p.cogs,s)));
+          return worstM(a)-worstM(b);
+        }).map((p,i)=>{
+          const domMargins=DOM_SHIPPING[500].map(s=>netMarginPct(p.price,p.cogs,s));
+          const intlMargins=INTL_SHIPPING[500].map(s=>netMarginPct(p.price,p.cogs,s));
+          const worstIntl=Math.min(...intlMargins);
+          const bestIntl=Math.max(...intlMargins);
+          const bestDom=Math.max(...domMargins);
+          const worstZone=INTL_ZONE_NAMES[intlMargins.indexOf(worstIntl)];
+          return(
+            <div key={i} style={{background:S,border:"1px solid "+BR,borderRadius:radius+2,marginBottom:8,padding:"12px 16px"}}>
+              <div style={{display:"flex",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+                <div style={{flex:1,minWidth:180}}>
+                  <div style={{fontFamily:ff,fontSize:13,color:TX,fontWeight:"bold"}}>{p.name}</div>
+                  <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>Price: ${p.price} · COGS: ${p.cogs} · Base margin: {((p.price-p.cogs-adP)/p.price*100).toFixed(1)}% pre-shipping</div>
+                </div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {[
+                    {l:"Best AU",v:bestDom.toFixed(1)+"%",c:pctColor(bestDom,targetM)},
+                    {l:"Best Intl",v:bestIntl.toFixed(1)+"%",c:pctColor(bestIntl,targetM)},
+                    {l:"Worst Intl",v:worstIntl.toFixed(1)+"%",c:pctColor(worstIntl,targetM)},
+                  ].map(({l,v,c})=>(
+                    <div key={l} style={{textAlign:"center",background:S2,border:"1px solid "+c+"44",borderRadius:radius,padding:"6px 10px",minWidth:72}}>
+                      <div style={{fontFamily:ff,fontSize:8,color:MU,textTransform:"uppercase",letterSpacing:0.5,marginBottom:2}}>{l}</div>
+                      <div style={{fontFamily:ff,fontSize:14,color:c,fontWeight:"bold"}}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {worstIntl<targetM&&(
+                <div style={{marginTop:8,fontFamily:ff,fontSize:10,color:worstIntl<0?RD:YL,lineHeight:1.6}}>
+                  {worstIntl<0?"⚠ LOSS in ":"⚠ Below target in "}{worstZone} — min price ${minPrice(p.cogs,INTL_SHIPPING[500][intlMargins.indexOf(worstIntl)],adP,targetM).toFixed(0)} needed ({((minPrice(p.cogs,INTL_SHIPPING[500][intlMargins.indexOf(worstIntl)],adP,targetM)-p.price)/p.price*100).toFixed(0)}% increase)
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ── TAB: Domestic detail ──
+  const renderDomesticTab=()=>{
+    const prod=shippingProducts.find(p=>p.name===selProduct)||shippingProducts[0];
+    const ships=DOM_SHIPPING[selWeight]||DOM_SHIPPING[500];
+    return(
+      <div>
+        <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+          <div style={{flex:2,minWidth:200}}>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:5}}>Product</div>
+            <select value={selProduct} onChange={e=>setSelProduct(e.target.value)} style={{...inp}}>
+              {shippingProducts.map(p=><option key={p.name} value={p.name}>{p.name}</option>)}
+            </select>
+          </div>
+          <div style={{minWidth:120}}>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:5}}>Weight</div>
+            <select value={selWeight} onChange={e=>setSelWeight(parseInt(e.target.value))} style={{...inp}}>
+              {WEIGHT_OPTS.filter(w=>[250,500,1000].includes(w.v)).map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontFamily:ff}}>
+            <thead>
+              <tr>
+                {["Zone","Shipping","After COGS","After Ship","After Ad","Net Margin","Min Price for "+targetM+"%"].map(h=>(
+                  <th key={h} style={{padding:"8px 10px",fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.8,textAlign:"left",borderBottom:"1px solid "+BR,whiteSpace:"nowrap"}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {ships.map((ship,i)=>{
+                const afterCogs=prod.price-prod.cogs;
+                const afterShip=afterCogs-ship;
+                const afterAd=afterShip-adPO;
+                const mPct=prod.price>0?(afterAd/prod.price)*100:0;
+                const mp=minPrice(prod.cogs,ship,adPO,targetM);
+                const inc=((mp-prod.price)/prod.price)*100;
+                return(
+                  <tr key={i} style={{borderBottom:"1px solid "+BR+"33",background:i%2===0?"transparent":S2+"44"}}>
+                    <td style={{padding:"10px 10px",fontFamily:ff,fontSize:12,color:TX}}>{DOM_ZONE_NAMES[i]}</td>
+                    <td style={{padding:"10px 10px",fontFamily:ff,fontSize:12,color:MU}}>${ship.toFixed(2)}</td>
+                    <td style={{padding:"10px 10px",fontFamily:ff,fontSize:12,color:TX}}>${afterCogs.toFixed(2)}</td>
+                    <td style={{padding:"10px 10px",fontFamily:ff,fontSize:12,color:afterShip>=0?TX:RD}}>${afterShip.toFixed(2)}</td>
+                    <td style={{padding:"10px 10px",fontFamily:ff,fontSize:12,color:afterAd>=0?TX:RD}}>${afterAd.toFixed(2)}</td>
+                    <td style={{padding:"10px 10px"}}>
+                      <span style={{fontFamily:ff,fontSize:11,color:pillC(mPct),background:pillC(mPct)+"18",padding:"2px 8px",borderRadius:10,fontWeight:"bold"}}>{mPct.toFixed(1)}% {pillLabel(mPct)}</span>
+                    </td>
+                    <td style={{padding:"10px 10px",fontFamily:ff,fontSize:12}}>
+                      <span style={{color:TX,fontWeight:"bold"}}>${mp.toFixed(0)}</span>
+                      {inc>0.5&&<span style={{fontFamily:ff,fontSize:10,color:RD,marginLeft:6}}>(+{inc.toFixed(0)}% needed)</span>}
+                      {inc<=0.5&&<span style={{fontFamily:ff,fontSize:10,color:GR,marginLeft:6}}>✓ current ok</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  // ── TAB: International detail ──
+  const renderIntlTab=()=>{
+    const prod=shippingProducts.find(p=>p.name===selProduct)||shippingProducts[0];
+    const ships=INTL_SHIPPING[selWeight]||INTL_SHIPPING[500];
+    return(
+      <div>
+        <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+          <div style={{flex:2,minWidth:200}}>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:5}}>Product</div>
+            <select value={selProduct} onChange={e=>setSelProduct(e.target.value)} style={{...inp}}>
+              {shippingProducts.map(p=><option key={p.name} value={p.name}>{p.name}</option>)}
+            </select>
+          </div>
+          <div style={{minWidth:120}}>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:5}}>Weight</div>
+            <select value={selWeight} onChange={e=>setSelWeight(parseInt(e.target.value))} style={{...inp}}>
+              {WEIGHT_OPTS.map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontFamily:ff}}>
+            <thead>
+              <tr>
+                {["Zone","Shipping","After COGS+Ship","After Ad Spend","Net Margin","Min Price for "+targetM+"%","% Increase"].map(h=>(
+                  <th key={h} style={{padding:"8px 10px",fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.8,textAlign:"left",borderBottom:"1px solid "+BR,whiteSpace:"nowrap"}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {ships.map((ship,i)=>{
+                const afterShip=prod.price-prod.cogs-ship;
+                const afterAd=afterShip-adPO;
+                const mPct=prod.price>0?(afterAd/prod.price)*100:0;
+                const mp=minPrice(prod.cogs,ship,adPO,targetM);
+                const inc=((mp-prod.price)/prod.price)*100;
+                return(
+                  <tr key={i} style={{borderBottom:"1px solid "+BR+"33",background:mPct<0?RD+"0a":i%2===0?"transparent":S2+"44"}}>
+                    <td style={{padding:"10px 10px",fontFamily:ff,fontSize:12,color:TX,fontWeight:"bold"}}>{INTL_ZONE_NAMES[i]}</td>
+                    <td style={{padding:"10px 10px",fontFamily:ff,fontSize:12,color:MU}}>${ship.toFixed(2)}</td>
+                    <td style={{padding:"10px 10px",fontFamily:ff,fontSize:12,color:afterShip>=0?TX:RD}}>${afterShip.toFixed(2)}</td>
+                    <td style={{padding:"10px 10px",fontFamily:ff,fontSize:12,color:afterAd>=0?TX:RD}}>${afterAd.toFixed(2)}</td>
+                    <td style={{padding:"10px 10px"}}>
+                      <span style={{fontFamily:ff,fontSize:11,color:pillC(mPct),background:pillC(mPct)+"18",padding:"2px 8px",borderRadius:10,fontWeight:"bold"}}>{mPct.toFixed(1)}% {pillLabel(mPct)}</span>
+                    </td>
+                    <td style={{padding:"10px 10px",fontFamily:ff,fontSize:13,color:TX,fontWeight:"bold"}}>${mp.toFixed(0)}</td>
+                    <td style={{padding:"10px 10px",fontFamily:ff,fontSize:11,color:inc>0?RD:GR}}>
+                      {inc>0.5?"+"+inc.toFixed(0)+"%":"✓ ok"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  // ── TAB: Recommended prices matrix ──
+  const renderRecommendedTab=()=>{
+    const domShip=DOM_SHIPPING[recWeight]||DOM_SHIPPING[500];
+    const intlShip=INTL_SHIPPING[recWeight]||INTL_SHIPPING[500];
+    const allZones=[...DOM_ZONE_NAMES,...INTL_ZONE_NAMES];
+    const allShips=[...domShip,...intlShip];
+    return(
+      <div>
+        <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+          <div style={{minWidth:120}}>
+            <div style={{fontFamily:ff,fontSize:10,color:MU,textTransform:"uppercase",letterSpacing:0.7,marginBottom:5}}>Weight bracket</div>
+            <select value={recWeight} onChange={e=>setRecWeight(parseInt(e.target.value))} style={{...inp}}>
+              {WEIGHT_OPTS.filter(w=>intlShip||[250,500,1000].includes(w.v)).map(w=><option key={w.v} value={w.v}>{w.l}</option>)}
+            </select>
+          </div>
+          <div style={{fontFamily:ff,fontSize:11,color:MU,paddingTop:20}}>Orange = price increase needed &gt;0% · Red = &gt;20% increase needed</div>
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{borderCollapse:"collapse",fontFamily:ff,fontSize:11,minWidth:900}}>
+            <thead>
+              <tr>
+                <th style={{padding:"8px 10px",fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.8,textAlign:"left",borderBottom:"1px solid "+BR,position:"sticky",left:0,background:S2,zIndex:2}}>Product</th>
+                <th style={{padding:"8px 10px",fontFamily:ff,fontSize:9,color:MU,textTransform:"uppercase",letterSpacing:0.8,textAlign:"right",borderBottom:"1px solid "+BR,whiteSpace:"nowrap"}}>Current $</th>
+                {allZones.map((z,i)=>(
+                  <th key={i} style={{padding:"8px 6px",fontFamily:ff,fontSize:8,color:i<3?A:MU,textTransform:"uppercase",letterSpacing:0.5,textAlign:"right",borderBottom:"1px solid "+BR,whiteSpace:"nowrap",minWidth:72}}>
+                    {z.replace("AU Zone ","AUZ").replace("Rest of ","").replace(" Islands","Is.").replace("USA & Canada","USA/CA").replace("UK & Ireland","UK/IE")}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {shippingProducts.map((p,pi)=>(
+                <tr key={pi} style={{borderBottom:"1px solid "+BR+"22"}}>
+                  <td style={{padding:"8px 10px",fontFamily:ff,fontSize:11,color:TX,fontWeight:"bold",position:"sticky",left:0,background:pi%2===0?S:S2,zIndex:1,whiteSpace:"nowrap"}}>{p.name}</td>
+                  <td style={{padding:"8px 10px",fontFamily:ff,fontSize:12,color:A,textAlign:"right",fontWeight:"bold"}}>${p.price}</td>
+                  {allShips.map((ship,si)=>{
+                    const mp=minPrice(p.cogs,ship,adPO,targetM);
+                    const inc=((mp-p.price)/p.price)*100;
+                    const bg=inc>20?RD+"18":inc>0?YL+"18":"transparent";
+                    const col=inc>20?RD:inc>0?YL:GR;
+                    return(
+                      <td key={si} style={{padding:"6px 6px",textAlign:"right",background:bg}}>
+                        <div style={{fontFamily:ff,fontSize:12,color:col,fontWeight:inc>0?"bold":"normal"}}>${mp.toFixed(0)}</div>
+                        {inc>0.5&&<div style={{fontFamily:ff,fontSize:9,color:col}}>+{inc.toFixed(0)}%</div>}
+                        {inc<=0.5&&<div style={{fontFamily:ff,fontSize:9,color:GR}}>✓</div>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  // ── TAB: Edit product list ──
+  const renderEditProductsTab=()=>(
+    <div>
+      <div style={{fontFamily:ff,fontSize:10,color:MU,marginBottom:16,lineHeight:1.7}}>
+        Edit your product list — prices and COGS are used across all zone calculations. Changes save automatically.
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(340px,1fr))",gap:10,marginBottom:16}}>
+        {shippingProducts.map((p,i)=>(
+          <div key={i} style={{background:S,border:"1px solid "+BR,borderRadius:radius+1,padding:"12px 14px"}}>
+            {editingProduct===i?(
+              <div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 80px 80px",gap:8,marginBottom:8}}>
+                  <input value={editDraft.name||""} onChange={e=>setEditDraft(d=>({...d,name:e.target.value}))} placeholder="Product name" style={{...inp,fontSize:12}}/>
+                  <input type="number" value={editDraft.price||""} onChange={e=>setEditDraft(d=>({...d,price:parseFloat(e.target.value)||0}))} placeholder="Price" style={{...inp,fontSize:12}}/>
+                  <input type="number" value={editDraft.cogs||""} onChange={e=>setEditDraft(d=>({...d,cogs:parseFloat(e.target.value)||0}))} placeholder="COGS" style={{...inp,fontSize:12}}/>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>{const np=[...shippingProducts];np[i]={...editDraft};saveShippingProducts(np);setEditingProduct(null);}} style={{flex:1,padding:"6px 0",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold"}}>Save</button>
+                  <button onClick={()=>setEditingProduct(null)} style={{padding:"6px 12px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius}}>Cancel</button>
+                  <button onClick={()=>{const np=shippingProducts.filter((_,j)=>j!==i);saveShippingProducts(np);setEditingProduct(null);}} style={{padding:"6px 12px",background:"transparent",border:"1px solid "+RD+"66",color:RD,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius}}>Delete</button>
+                </div>
+              </div>
+            ):(
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{flex:1}}>
+                  <div style={{fontFamily:ff,fontSize:12,color:TX,fontWeight:"bold"}}>{p.name}</div>
+                  <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:2}}>Price: ${p.price} · COGS: ${p.cogs} · Base GM: {((p.price-p.cogs)/p.price*100).toFixed(0)}%</div>
+                </div>
+                <button onClick={()=>{setEditingProduct(i);setEditDraft({...p});}} style={{padding:"4px 10px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:10,cursor:"pointer",borderRadius:radius}}>Edit</button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {/* Add new product */}
+      <div style={{background:S,border:"1px solid "+A+"44",borderRadius:radius+1,padding:"14px 16px"}}>
+        <div style={{fontFamily:ff,fontSize:9,color:A,letterSpacing:1.5,textTransform:"uppercase",marginBottom:10}}>Add Product</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 100px 100px auto",gap:8,alignItems:"flex-end"}}>
+          <input id="new-prod-name" type="text" placeholder="Product name" style={{...inp}}/>
+          <input id="new-prod-price" type="number" placeholder="Price $" style={{...inp}}/>
+          <input id="new-prod-cogs" type="number" placeholder="COGS $" style={{...inp}}/>
+          <button onClick={()=>{
+            const name=document.getElementById("new-prod-name").value.trim();
+            const price=parseFloat(document.getElementById("new-prod-price").value)||0;
+            const cogs=parseFloat(document.getElementById("new-prod-cogs").value)||0;
+            if(!name||!price)return;
+            saveShippingProducts([...shippingProducts,{name,price,cogs}]);
+            document.getElementById("new-prod-name").value="";
+            document.getElementById("new-prod-price").value="";
+            document.getElementById("new-prod-cogs").value="";
+          }} style={{padding:"8px 16px",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",whiteSpace:"nowrap"}}>Add</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const ZONE_TABS=[
+    {id:"overview",l:"Zone Overview"},
+    {id:"domestic",l:"AU Domestic"},
+    {id:"international",l:"International"},
+    {id:"recommended",l:"Recommended Prices"},
+    {id:"products",l:"Edit Products"},
+  ];
+
+  return(
+    <div>
+      {renderHeader()}
+
+      {/* Main tab nav */}
+      <div style={{display:"flex",borderBottom:"1px solid "+BR,background:S2,marginBottom:0}}>
+        {[
+          {id:"product",l:"Shopify Product Margin"},
+          {id:"zones",l:"Shipping Zone Analysis"},
+        ].map(t=>(
+          <button key={t.id} onClick={()=>setActiveTab(t.id)}
+            style={{padding:"12px 20px",background:"transparent",border:"none",borderBottom:activeTab===t.id?"2px solid "+A:"2px solid transparent",color:activeTab===t.id?A:MU,fontFamily:ff,fontSize:12,cursor:"pointer",marginBottom:-1,letterSpacing:0.5,whiteSpace:"nowrap"}}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
+      {activeTab==="product"&&(
+        <div style={{paddingTop:20}}>
+          {renderProductTab()}
+        </div>
+      )}
+
+      {activeTab==="zones"&&(
+        <div>
+          {/* Zone sub-tab nav */}
+          <div style={{display:"flex",borderBottom:"1px solid "+BR,background:S,flexWrap:"wrap"}}>
+            {ZONE_TABS.map(t=>(
+              <button key={t.id} onClick={()=>setZoneTab(t.id)}
+                style={{padding:"9px 14px",background:"transparent",border:"none",borderBottom:zoneTab===t.id?"2px solid "+A:"2px solid transparent",color:zoneTab===t.id?A:MU,fontFamily:ff,fontSize:11,cursor:"pointer",marginBottom:-1,letterSpacing:0.5,whiteSpace:"nowrap"}}>
+                {t.l}
+              </button>
+            ))}
+          </div>
+          <div style={{padding:"20px 0"}}>
+            {zoneTab==="overview"&&renderZoneOverview()}
+            {zoneTab==="domestic"&&renderDomesticTab()}
+            {zoneTab==="international"&&renderIntlTab()}
+            {zoneTab==="recommended"&&renderRecommendedTab()}
+            {zoneTab==="products"&&renderEditProductsTab()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -5130,8 +5799,14 @@ function App(){
                 productCatalogue={settings?.productCatalogue||{}}
                 onProductMarginUpdate={updateProductMargin}
                 onProductCatalogueUpdate={updateProductCatalogue}
-                targetMargin={curWeeks[0]?.weekTargets?.gross_margin_target||55}
+                targetMargin={curWeeks[0]?.weekTargets?.gross_margin_target||25}
                 satchelCost={fixed?.satchelCostDefault||"0.85"}
+                monthLabel={selMonth?.label}
+                onSaveReport={report=>{
+                  const key="margin_"+Date.now();
+                  const updated={...monthData,[key]:{label:report.label,lastSaved:report.savedAt,type:"margin_analysis",weeks:[],marginReport:report}};
+                  handleSaveMonthData(updated);
+                }}
               />
             </FullPageModal>
           </ThemeContext.Provider>
