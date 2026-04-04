@@ -269,8 +269,8 @@ const allWageKeys = depts => (depts||DEFAULT_WAGE_DEPTS).flatMap(d=>d.subs.map(s
 // ─── Month / Week helpers ─────────────────────────────────────────────────────
 function getMonthWeeks(year, month) {
   const first = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
 
+  // Find Monday on or before the 1st
   const dow = first.getDay();
   const daysBack = dow === 0 ? 6 : dow - 1;
 
@@ -288,11 +288,16 @@ function getMonthWeeks(year, month) {
     const mon = new Date(mon0);
     mon.setDate(mon0.getDate() + w * 7);
 
-    // FIX
-    if (mon > lastDay) break;
-
     const sun = new Date(mon);
     sun.setDate(mon.getDate() + 6);
+
+    // ✅ Include:
+    // - first partial week
+    // - all weeks where Monday is inside this month
+    const isFirstPartial = w === 0;
+    const mondayInMonth = mon.getMonth() === month;
+
+    if (!isFirstPartial && !mondayInMonth) break;
 
     weeks.push({
       weekNum: w + 1,
@@ -302,6 +307,23 @@ function getMonthWeeks(year, month) {
   }
 
   return weeks;
+}
+
+function monthKey(y,m){return y+"-"+String(m).padStart(2,"0");}
+function monthLabel(y,m){return new Date(y,m,1).toLocaleString("default",{month:"long",year:"numeric"});}
+function getAvailableMonths(){
+  const out=[]; const end=new Date(); end.setMonth(end.getMonth()+2);
+  let cur=new Date(2025,0,1);
+  while(cur<=end){
+    out.push({
+      year:cur.getFullYear(),
+      month:cur.getMonth(),
+      key:monthKey(cur.getFullYear(),cur.getMonth()),
+      label:monthLabel(cur.getFullYear(),cur.getMonth())
+    });
+    cur.setMonth(cur.getMonth()+1);
+  }
+  return out;
 }
 function monthKey(y,m){return y+"-"+String(m).padStart(2,"0");}
 function monthLabel(y,m){return new Date(y,m,1).toLocaleString("default",{month:"long",year:"numeric"});}
