@@ -267,20 +267,40 @@ const DEFAULT_STAFF = [
 const allWageKeys = depts => (depts||DEFAULT_WAGE_DEPTS).flatMap(d=>d.subs.map(s=>s.key));
 
 // ─── Month / Week helpers ─────────────────────────────────────────────────────
-function getMonthWeeks(year,month){
-  const first=new Date(year,month,1);
-  const lastDay=new Date(year,month+1,0); // last day of month
-  const dow=first.getDay(), daysBack=dow===0?6:dow-1;
-  const mon0=new Date(first); mon0.setDate(first.getDate()-daysBack);
-  const fmt=d=>String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+String(d.getFullYear()).slice(-2);
-  const weeks=[];
-  for(let w=0;;w++){
-    const mon=new Date(mon0); mon.setDate(mon0.getDate()+w*7);
-    const sun=new Date(mon); sun.setDate(mon.getDate()+6);
-    weeks.push({weekNum:w+1,label:"Week "+(w+1),dateRange:fmt(mon)+" - "+fmt(sun)});
-    // stop once this week's Monday is past the last day of the month
-    if(sun>=lastDay)break;
+function getMonthWeeks(year, month) {
+  const first = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+
+  const dow = first.getDay();
+  const daysBack = dow === 0 ? 6 : dow - 1;
+
+  const mon0 = new Date(first);
+  mon0.setDate(first.getDate() - daysBack);
+
+  const fmt = d =>
+    String(d.getDate()).padStart(2, "0") + "/" +
+    String(d.getMonth() + 1).padStart(2, "0") + "/" +
+    String(d.getFullYear()).slice(-2);
+
+  const weeks = [];
+
+  for (let w = 0; ; w++) {
+    const mon = new Date(mon0);
+    mon.setDate(mon0.getDate() + w * 7);
+
+    // FIX
+    if (mon > lastDay) break;
+
+    const sun = new Date(mon);
+    sun.setDate(mon.getDate() + 6);
+
+    weeks.push({
+      weekNum: w + 1,
+      label: "Week " + (w + 1),
+      dateRange: fmt(mon) + " - " + fmt(sun),
+    });
   }
+
   return weeks;
 }
 function monthKey(y,m){return y+"-"+String(m).padStart(2,"0");}
