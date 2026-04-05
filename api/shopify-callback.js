@@ -1,15 +1,13 @@
 // Vercel serverless function — handles Shopify OAuth callback
-const STORE = "fm2uclothing.myshopify.com";
-
 export default async function handler(req, res) {
-  const { code, error } = req.query;
+  const { code, error, shop } = req.query;
 
   if (error) {
     return res.redirect(302, `/?shopify_error=${encodeURIComponent(error)}`);
   }
 
-  if (!code) {
-    return res.status(400).send("Missing authorization code.");
+  if (!code || !shop) {
+    return res.status(400).send("Missing authorization code or shop.");
   }
 
   const clientId = process.env.SHOPIFY_CLIENT_ID;
@@ -20,7 +18,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const tokenRes = await fetch(`https://${STORE}/admin/oauth/access_token`, {
+    const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code }),
@@ -38,7 +36,8 @@ export default async function handler(req, res) {
       return res.status(401).send("No access token in response: " + JSON.stringify(data));
     }
 
-    res.redirect(302, `/?shopify_token=${encodeURIComponent(accessToken)}`);
+    // Pass both token and shop back to the frontend
+    res.redirect(302, `/?shopify_token=${encodeURIComponent(accessToken)}&shopify_shop=${encodeURIComponent(shop)}`);
   } catch (e) {
     res.status(500).send("OAuth callback error: " + e.message);
   }
