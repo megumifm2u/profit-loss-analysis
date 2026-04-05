@@ -2195,6 +2195,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
   const [targets,setTargets]=useState(labels?._targets||DEFAULT_TARGETS);
   const [saved,setSaved]=useState(false);
   const [shopCreds,setShopCreds]=useState({accessToken:settings?.shopify?.accessToken||"",shop:settings?.shopify?.shop||""});
+  const [shopDomain,setShopDomain]=useState(settings?.shopify?.shop||"");
   const [shopMsg,setShopMsg]=useState(settings?.shopify?.accessToken?"Connected — Shopify is ready":"");
   const [shopMsgOk,setShopMsgOk]=useState(!!settings?.shopify?.accessToken);
   const [shopTesting,setShopTesting]=useState(false);
@@ -2407,17 +2408,13 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
             Connect your Shopify store so you can pull weekly revenue, orders, and discount code data with one click — no manual copy-paste needed.
           </div>
           <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"16px 18px",marginBottom:16}}>
-            <div style={{fontFamily:ff,fontSize:9,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:14}}>Store</div>
-            <div style={{fontFamily:ff,fontSize:13,color:TX,padding:"7px 10px",background:S2,border:"1px solid "+BR,borderRadius:radius,opacity:0.6}}>a35aba-f9.myshopify.com</div>
-          </div>
-          <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"16px 18px",marginBottom:16}}>
             <div style={{fontFamily:ff,fontSize:9,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:14}}>Connection</div>
             {shopCreds.accessToken?(
               <div>
                 <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
                   <div style={{width:8,height:8,borderRadius:"50%",background:GR,flexShrink:0}}/>
                   <span style={{fontFamily:ff,fontSize:13,color:GR,fontWeight:"bold"}}>Connected</span>
-                  <span style={{fontFamily:ff,fontSize:11,color:MU}}>{shopCreds.shop||"a35aba-f9.myshopify.com"}</span>
+                  <span style={{fontFamily:ff,fontSize:11,color:MU}}>{shopCreds.shop}</span>
                 </div>
                 <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
                   <button onClick={testShopify} disabled={shopTesting} style={{padding:"9px 18px",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:11,cursor:shopTesting?"wait":"pointer",borderRadius:radius,letterSpacing:1,opacity:shopTesting?0.6:1}}>
@@ -2433,9 +2430,25 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
                   <div style={{width:8,height:8,borderRadius:"50%",background:MU,flexShrink:0}}/>
                   <span style={{fontFamily:ff,fontSize:13,color:MU}}>Not connected</span>
                 </div>
-                <a href="/api/shopify-auth" style={{display:"inline-block",padding:"9px 22px",background:A,color:"#ffffff",fontFamily:ff,fontSize:11,textDecoration:"none",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>CONNECT WITH SHOPIFY</a>
+                <Fld label="Your Shopify store domain">
+                  <input
+                    value={shopDomain}
+                    onChange={e=>setShopDomain(e.target.value.trim().toLowerCase())}
+                    style={inp}
+                    placeholder="yourstore.myshopify.com"
+                    autoComplete="off"
+                  />
+                </Fld>
+                <div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:6,marginBottom:14,lineHeight:1.6}}>
+                  Find this in your Shopify admin URL: admin.shopify.com/store/<strong>handle</strong> — your domain is <strong>handle.myshopify.com</strong>
+                </div>
+                <a
+                  href={shopDomain?`/api/shopify-auth?shop=${encodeURIComponent(shopDomain)}`:"#"}
+                  onClick={e=>{if(!shopDomain){e.preventDefault();setShopMsg("Enter your store domain first");setShopMsgOk(false);}}}
+                  style={{display:"inline-block",padding:"9px 22px",background:shopDomain?A:MU,color:"#ffffff",fontFamily:ff,fontSize:11,textDecoration:"none",borderRadius:radius,fontWeight:"bold",letterSpacing:1,opacity:shopDomain?1:0.5,cursor:shopDomain?"pointer":"not-allowed"}}
+                >CONNECT WITH SHOPIFY</a>
                 <div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:10,lineHeight:1.6}}>
-                  Clicking connect will open Shopify for you to approve access. You'll be redirected back automatically.
+                  You'll be redirected to Shopify to approve access, then brought back automatically.
                 </div>
                 {shopMsg&&<div style={{fontFamily:ff,fontSize:12,color:RD,marginTop:8}}>{shopMsg}</div>}
               </div>
