@@ -60,7 +60,7 @@ export default async function handler(req, res) {
   // ── GraphQL Analytics — exact same figures as Shopify dashboard ────────────
   const analyticsQuery = `
     {
-      shopifyqlQuery(query: "SELECT gross_sales, net_sales, total_sales, returns, discounts, shipping_charges, orders_count FROM sales_over_time WHERE date >= '${startLocal}' AND date <= '${endLocal}'") {
+      shopifyqlQuery(query: "SELECT sum(gross_sales) as gross_sales, sum(returns) as returns, sum(discounts) as discounts, sum(shipping_charges) as shipping_charges, count(orders) as orders_count FROM sales WHERE day >= '${startLocal}' AND day <= '${endLocal}'") {
         parseErrors { code message }
         tableData {
           rowData
@@ -72,6 +72,7 @@ export default async function handler(req, res) {
 
   let grossSales = 0, refundAmount = 0, totalDiscounts = 0, shippingIncome = 0, orderCount = 0;
   let usedGraphQL = false;
+  let gqlDebug = null;
 
   try {
     const gqlRes = await fetch(`https://${store}/admin/api/${API_VERSION}/graphql.json`, {
@@ -80,14 +81,15 @@ export default async function handler(req, res) {
       body: JSON.stringify({ query: analyticsQuery }),
     });
 
+    const gqlData = await gqlRes.json();
+    gqlDebug = JSON.stringify(gqlData).slice(0, 500);
+
     if (gqlRes.ok) {
-      const gqlData = await gqlRes.json();
       const tableData = gqlData?.data?.shopifyqlQuery?.tableData;
       const parseErrors = gqlData?.data?.shopifyqlQuery?.parseErrors;
 
       if (!parseErrors?.length && tableData?.rowData?.length) {
         const cols = tableData.columns.map(c => c.name);
-        // Sum across all date rows
         for (const row of tableData.rowData) {
           const get = name => parseFloat(row[cols.indexOf(name)] || 0);
           grossSales    += get("gross_sales");
@@ -99,7 +101,7 @@ export default async function handler(req, res) {
         usedGraphQL = true;
       }
     }
-  } catch (e) { /* fall through to REST */ }
+  } catch (e) { gqlDebug = e.message; }
 
   // ── Fallback: REST Orders API if GraphQL analytics not available ───────────
   if (!usedGraphQL) {
@@ -185,6 +187,6 @@ export default async function handler(req, res) {
     },
     orderCount: Math.round(orderCount),
     discountCodes: Object.values(codeMap).sort((a, b) => b.amount - a.amount),
-    _debug: { usedGraphQL, timezone: ianaTimezone, startLocal, endLocal },
+    _debug: { usedGraphQL, timezone: ianaTimezone, startLocal, endLocal, gqlDebug },
   });
 }
