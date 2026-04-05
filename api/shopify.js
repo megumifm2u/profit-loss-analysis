@@ -125,6 +125,16 @@ export default async function handler(req, res) {
 
   const r2 = v => Math.round(v * 100) / 100;
 
+  // Debug: break down by source and gateway to find the 5 extra orders
+  const sourceTally = {};
+  const gatewayTally = {};
+  orders.forEach(o => {
+    const s = o.source_name || "unknown";
+    sourceTally[s] = (sourceTally[s] || 0) + 1;
+    const g = o.gateway || "none";
+    gatewayTally[g] = (gatewayTally[g] || 0) + 1;
+  });
+
   return res.status(200).json({
     revenue: {
       gross_sales: r2(grossSales),
@@ -134,6 +144,6 @@ export default async function handler(req, res) {
     },
     orderCount: orders.length,
     discountCodes: Object.values(codeMap).sort((a, b) => b.amount - a.amount),
-    _debug: { timezone: ianaTimezone, startUTC, endUTC, orderCount: orders.length },
+    _debug: { timezone: ianaTimezone, startUTC, endUTC, orderCount: orders.length, sourceTally, gatewayTally },
   });
 }
