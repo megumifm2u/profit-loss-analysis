@@ -187,6 +187,18 @@ export default async function handler(req, res) {
     },
     orderCount: orders.length,
     discountCodes: Object.values(codeMap).sort((a, b) => b.amount - a.amount),
-    _debug: { timezone: ianaTimezone, startUTC, endUTC, orderCount: orders.length, sourceTally, gatewayTally },
+    _debug: {
+      timezone: ianaTimezone, startUTC, endUTC, orderCount: orders.length,
+      grossSalesFromLineItems: r2(orders.reduce((s,o)=>{
+        for(const li of o.line_items||[]){ if(!li.gift_card) s+=parseFloat(li.price||0)*(li.quantity||0); }
+        return s;
+      },0)),
+      grossSalesFromSubtotal: r2(orders.reduce((s,o)=>s+parseFloat(o.subtotal_price||0)+parseFloat(o.total_discounts||0),0)),
+      totalDiscountsSummed: r2(orders.reduce((s,o)=>s+parseFloat(o.total_discounts||0),0)),
+      shippingDiscountsTotal: r2(orders.reduce((s,o)=>{
+        for(const sl of o.shipping_lines||[]){ for(const da of sl.discount_allocations||[]){ s+=parseFloat(da.amount||0); } }
+        return s;
+      },0)),
+    },
   });
 }
