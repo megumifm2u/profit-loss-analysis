@@ -1,6 +1,6 @@
 // Vercel serverless function — Shopify data pull
 const STORE = "fm2uclothing.myshopify.com";
-const API_VERSION = "2024-04";
+const API_VERSION = "2025-07";
 
 export default async function handler(req, res) {
   res.setHeader("Content-Type", "application/json");
@@ -18,38 +18,44 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing date range." });
   }
 
-  // ── Fetch all orders (paginated) ──────────────────────────────────────────
-  const orders = [];
-  const fields = "id,line_items,total_discounts,shipping_lines,refunds,discount_codes,financial_status";
-  let nextUrl = `https://${STORE}/admin/api/${API_VERSION}/orders.json?status=any&created_at_min=${encodeURIComponent(startDate)}&created_at_max=${encodeURIComponent(endDate)}&limit=250&fields=${fields}`;
+  const headers = {
+    "X-Shopify-Access-Token": accessToken,
+    "Content-Type": "application/json",
+  };
 
-  try {
-    while (nextUrl) {
-      const r = await fetch(nextUrl, {
-        headers: {
-          "X-Shopify-Access-Token": accessToken,
-          "Content-Type": "application/json",
-        },
-      });
+  // Fetch orders across all statuses (avoids needing protected read_all_orders scope)
+  const allOrders = [];
+  for (const status of ["open", "closed", "cancelled"]) {
+    const fields = "id,line_items,total_discounts,shipping_lines,refunds,discount_codes,financial_status";
+    let nextUrl = `https://${STORE}/admin/api/${API_VERSION}/orders.json?status=${status}&created_at_min=${encodeURIComponent(startDate)}&created_at_max=${encodeURIComponent(endDate)}&limit=250&fields=${fields}`;
 
-      if (r.status === 401) {
-        return res.status(401).json({ error: "Invalid or expired token — reconnect Shopify in Settings." });
+    try {
+      while (nextUrl) {
+        const r = await fetch(nextUrl, { headers });
+
+        if (r.status === 401) {
+          return res.status(401).json({ error: "Invalid or expired token — reconnect Shopify in Settings." });
+        }
+        if (!r.ok) {
+          const text = await r.text();
+          return res.status(502).json({ error: `Shopify API error (${r.status}) for status=${status}: ${text.slice(0, 200)}` });
+        }
+
+        const data = await r.json();
+        allOrders.push(...(data.orders || []));
+
+        const link = r.headers.get("link") || "";
+        const next = link.match(/<([^>]+)>;\s*rel="next"/);
+        nextUrl = next ? next[1] : null;
       }
-      if (!r.ok) {
-        const text = await r.text();
-        return res.status(502).json({ error: "Shopify API error (" + r.status + "): " + text.slice(0, 200) });
-      }
-
-      const data = await r.json();
-      orders.push(...(data.orders || []));
-
-      const link = r.headers.get("link") || "";
-      const next = link.match(/<([^>]+)>;\s*rel="next"/);
-      nextUrl = next ? next[1] : null;
+    } catch (e) {
+      return res.status(500).json({ error: `Fetch failed for status=${status}: ${e.message}` });
     }
-  } catch (e) {
-    return res.status(500).json({ error: "Fetch failed: " + e.message });
   }
+
+  // Deduplicate by order id (shouldn't overlap but just in case)
+  const seen = new Set();
+  const orders = allOrders.filter(o => { if (seen.has(o.id)) return false; seen.add(o.id); return true; });
 
   // ── Aggregate ─────────────────────────────────────────────────────────────
   let grossSales = 0, totalDiscounts = 0, shippingIncome = 0, refundAmount = 0;
