@@ -4383,6 +4383,10 @@ function App(){
             />
           </ThemeContext.Provider>
         )}
+        {/* Footer */}
+        <div style={{borderTop:"1px solid "+theme.border,marginTop:40,padding:"18px 24px",textAlign:"center"}}>
+          <span style={{fontFamily:theme.bodyFont||"Times New Roman",fontSize:10,color:theme.muted,letterSpacing:3,textTransform:"uppercase"}}>by Megumi</span>
+        </div>
       </div>
     </ThemeContext.Provider>
   );
