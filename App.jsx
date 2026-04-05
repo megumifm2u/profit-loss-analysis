@@ -5555,9 +5555,14 @@ function App(){
 
   const curKey=selMonth?.key;
   const curEntry=monthData[curKey];
-  const curWeeks=curEntry?.weeks||(()=>{
+  const curWeeks=(()=>{
     const wd=getMonthWeeks(selMonth.year,selMonth.month);
-    return wd.map(d=>emptyWeek(d.weekNum,d.dateRange,d.label,wageDepts,opexKeys));
+    const saved=curEntry?.weeks;
+    if(!saved||saved.length===0) return wd.map(d=>emptyWeek(d.weekNum,d.dateRange,d.label,wageDepts,opexKeys));
+    if(saved.length>=wd.length) return saved;
+    // Saved data has fewer weeks than the calendar expects — append missing weeks as empty
+    const extra=wd.slice(saved.length).map(d=>emptyWeek(d.weekNum,d.dateRange,d.label,wageDepts,opexKeys));
+    return [...saved,...extra];
   })();
   const curExtras=curEntry?.extras||emptyExtras(opexKeys);
 
