@@ -67,13 +67,14 @@ export default async function handler(req, res) {
     }
   }
 
-  // Deduplicate
+  // Deduplicate and exclude non-revenue orders
   const seen = new Set();
+  const EXCLUDE_STATUSES = new Set(["voided", "pending", "expired"]);
   const orders = allOrders.filter(o => {
     if (seen.has(o.id)) return false;
     seen.add(o.id);
-    // Exclude voided orders (cancelled before payment — no revenue)
-    return o.financial_status !== "voided";
+    // Only count orders that have actually been paid
+    return !EXCLUDE_STATUSES.has(o.financial_status);
   });
 
   // ── Fetch refunds processed during this period (covers refunds on older orders) ──
@@ -149,6 +150,10 @@ export default async function handler(req, res) {
 
   const r2 = v => Math.round(v * 100) / 100;
 
+  // Debug: tally by financial_status to diagnose order count differences
+  const statusTally = {};
+  allOrders.forEach(o => { statusTally[o.financial_status] = (statusTally[o.financial_status]||0)+1; });
+
   return res.status(200).json({
     revenue: {
       gross_sales: r2(grossSales),
@@ -158,5 +163,6 @@ export default async function handler(req, res) {
     },
     orderCount: orders.length,
     discountCodes: Object.values(codeMap).sort((a, b) => b.amount - a.amount),
+    _debug: { totalFetched: allOrders.length, afterFilter: orders.length, statusBreakdown: statusTally },
   });
 }
