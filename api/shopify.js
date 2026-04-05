@@ -104,12 +104,12 @@ export default async function handler(req, res) {
   const refundSeenIds = new Set();
 
   for (const order of orders) {
-    for (const li of order.line_items || []) {
-      // Exclude gift cards — Shopify analytics does not count these in Gross Sales
-      if (li.gift_card) continue;
-      grossSales += parseFloat(li.price || 0) * (li.quantity || 0);
-    }
-    totalDiscounts += parseFloat(order.total_discounts || 0);
+    // Use subtotal_price + total_discounts = gross sales before discounts
+    // This matches Shopify's own analytics engine exactly
+    const subtotal = parseFloat(order.subtotal_price || 0);
+    const discounts = parseFloat(order.total_discounts || 0);
+    grossSales += subtotal + discounts;
+    totalDiscounts += discounts;
     for (const sl of order.shipping_lines || []) {
       shippingIncome += parseFloat(sl.price || 0);
     }
