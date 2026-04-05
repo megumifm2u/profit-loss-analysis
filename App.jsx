@@ -1151,6 +1151,7 @@ function ShopifyImport({week,onChange,labels,settings}){
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
           accessToken:creds.accessToken,
+          shop:creds.shop||"fm2uclothing.myshopify.com",
           startDate:toISO(parts[0]),
           endDate:toISO(parts[1],true),
         }),
@@ -2193,7 +2194,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
   const [staff,setStaff]=useState(settings?.staff||DEFAULT_STAFF);
   const [targets,setTargets]=useState(labels?._targets||DEFAULT_TARGETS);
   const [saved,setSaved]=useState(false);
-  const [shopCreds,setShopCreds]=useState({accessToken:settings?.shopify?.accessToken||""});
+  const [shopCreds,setShopCreds]=useState({accessToken:settings?.shopify?.accessToken||"",shop:settings?.shopify?.shop||""});
   const [shopMsg,setShopMsg]=useState(settings?.shopify?.accessToken?"Connected — Shopify is ready":"");
   const [shopMsgOk,setShopMsgOk]=useState(!!settings?.shopify?.accessToken);
   const [shopTesting,setShopTesting]=useState(false);
@@ -2214,7 +2215,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
     setShopTesting(true);setShopMsg("Testing...");
     try{
       const now=new Date(); const d=now.toISOString().split("T")[0];
-      const r=await fetch("/api/shopify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({accessToken:shopCreds.accessToken.trim(),startDate:d+"T00:00:00+10:00",endDate:d+"T01:00:00+10:00"})});
+      const r=await fetch("/api/shopify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({accessToken:shopCreds.accessToken.trim(),shop:shopCreds.shop||"fm2uclothing.myshopify.com",startDate:d+"T00:00:00+10:00",endDate:d+"T01:00:00+10:00"})});
       const j=await r.json();
       if(!r.ok){setShopMsg(j.error||"Connection failed");setShopMsgOk(false);}
       else{setShopMsg("Connected — Shopify is ready");setShopMsgOk(true);}
@@ -2416,7 +2417,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
                 <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
                   <div style={{width:8,height:8,borderRadius:"50%",background:GR,flexShrink:0}}/>
                   <span style={{fontFamily:ff,fontSize:13,color:GR,fontWeight:"bold"}}>Connected</span>
-                  <span style={{fontFamily:ff,fontSize:11,color:MU}}>fm2uclothing.myshopify.com</span>
+                  <span style={{fontFamily:ff,fontSize:11,color:MU}}>{shopCreds.shop||"fm2uclothing.myshopify.com"}</span>
                 </div>
                 <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
                   <button onClick={testShopify} disabled={shopTesting} style={{padding:"9px 18px",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:11,cursor:shopTesting?"wait":"pointer",borderRadius:radius,letterSpacing:1,opacity:shopTesting?0.6:1}}>
@@ -4145,13 +4146,12 @@ function App(){
       // Check for Shopify OAuth token returned via URL param
       const params=new URLSearchParams(window.location.search);
       const shopifyToken=params.get("shopify_token");
+      const shopifyShop=params.get("shopify_shop");
       let finalSettings=s||{};
       if(shopifyToken){
-        finalSettings={...finalSettings,shopify:{...(finalSettings.shopify||{}),accessToken:shopifyToken}};
+        finalSettings={...finalSettings,shopify:{...(finalSettings.shopify||{}),accessToken:shopifyToken,...(shopifyShop?{shop:shopifyShop}:{})}};
         saveAll(md||{},f||emptyFixed(s?.opexKeys||DEFAULT_OPEX_KEYS),finalSettings);
-        // Clean token from URL without reload
-        const url=window.location.pathname+(params.get("shopify_error")?"?shopify_error="+params.get("shopify_error"):"");
-        window.history.replaceState({},"",url);
+        window.history.replaceState({},"",window.location.pathname);
       }
       setSettings(finalSettings);
       if(finalSettings?.theme)setThemeRaw({...DEFAULT_THEME,...finalSettings.theme});
