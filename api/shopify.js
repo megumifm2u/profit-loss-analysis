@@ -24,6 +24,19 @@ export default async function handler(req, res) {
     "Content-Type": "application/json",
   };
 
+  // Verify token is valid for this store before hitting orders
+  try {
+    const shopCheck = await fetch(`https://${store}/admin/api/${API_VERSION}/shop.json`, { headers });
+    if (!shopCheck.ok) {
+      const text = await shopCheck.text();
+      return res.status(401).json({
+        error: `Token rejected by ${store} (${shopCheck.status}). Please Disconnect and reconnect Shopify in Settings. Details: ${text.slice(0, 200)}`
+      });
+    }
+  } catch (e) {
+    return res.status(500).json({ error: `Could not reach ${store}: ${e.message}` });
+  }
+
   // Fetch orders across all statuses (avoids needing protected read_all_orders scope)
   const allOrders = [];
   for (const status of ["open", "closed", "cancelled"]) {
