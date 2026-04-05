@@ -135,7 +135,7 @@ const DEFAULT_TARGETS = {
 
 // ─── Labels ───────────────────────────────────────────────────────────────────
 const DEFAULT_LABELS = {
-  header_brand:"Finance Operations", header_title:"P&L Dashboard", header_subtitle:"weeks auto-dated Mon-Sun",
+  header_brand:"ClearTrace", header_title:"P&L", header_subtitle:"weeks auto-dated Mon-Sun",
   tab_input:"WEEKLY INPUT", tab_overview:"MONTHLY OVERVIEW", tab_visualise:"VISUALISE",
   tab_compare:"COMPARE", tab_fixed:"FIXED COSTS", tab_targets:"TARGETS", tab_reports:"REPORTS",
   sec_shopify:"Shopify Data Import", sec_shopify_btn:"AUTOFILL FROM DATA",
@@ -2228,83 +2228,54 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
   return(
     <div>
       <div style={{display:"flex",gap:8,marginBottom:24,flexWrap:"wrap"}}>
-        {["appearance","colours","targets","staff","shopify"].map(t=>(
-          <button key={t} onClick={()=>setActiveTab(t)}
-            style={{padding:"8px 16px",background:activeTab===t?A:"transparent",border:"1px solid "+(activeTab===t?A:BR),color:activeTab===t?"#ffffff":MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
-            {t}
+        {[{id:"theme",label:"Theme"},{id:"staff",label:"Staff"},{id:"shopify",label:"Shopify"}].map(t=>(
+          <button key={t.id} onClick={()=>setActiveTab(t.id)}
+            style={{padding:"8px 20px",background:activeTab===t.id?A:"transparent",border:"1px solid "+(activeTab===t.id?A:BR),color:activeTab===t.id?"#ffffff":MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
+            {t.label}
           </button>
         ))}
       </div>
-      {activeTab==="appearance"&&(
+      {activeTab==="theme"&&(
         <div>
+          <SH>Colour Presets</SH>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:24}}>
+            {COLOR_PRESETS.map(p=>(
+              <button key={p.name} onClick={()=>{const nt={...themeEdit,...p.theme};setThemeEdit(nt);onThemeChange(nt);}}
+                style={{padding:"10px 16px",background:"transparent",border:"1px solid "+BR,color:TX,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,display:"flex",alignItems:"center",gap:10}}>
+                <div style={{display:"flex",gap:3}}>{["accent","bg","green","red"].map(k=><div key={k} style={{width:12,height:12,borderRadius:3,background:p.theme[k]||"#888"}}/>)}</div>
+                {p.name}
+              </button>
+            ))}
+          </div>
           <SH>Fonts</SH>
           <Grid>
             <Fld label="Title Font"><select value={themeEdit.titleFont||"Times New Roman"} onChange={e=>setThemeEdit({...themeEdit,titleFont:e.target.value})} style={inp}>{FONT_OPTIONS.map(f=><option key={f} value={f}>{f}</option>)}</select></Fld>
             <Fld label="Body Font"><select value={themeEdit.bodyFont||"Times New Roman"} onChange={e=>setThemeEdit({...themeEdit,bodyFont:e.target.value})} style={inp}>{FONT_OPTIONS.map(f=><option key={f} value={f}>{f}</option>)}</select></Fld>
           </Grid>
-          <SH>Title Sizes</SH>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:4}}>
-            {[
-              {key:"headerTitleSize",label:"Dashboard Title",default:22,min:14,max:48},
-              {key:"headerBrandSize",label:"Brand Subtitle",default:9,min:7,max:18},
-              {key:"sectionHeaderSize",label:"Section Headers",default:10,min:8,max:20},
-              {key:"subSectionSize",label:"Sub-Section Headers",default:9,min:7,max:16},
-            ].map(({key,label,default:def,min,max})=>(
-              <div key={key} style={{marginBottom:8}}>
-                <div style={{fontFamily:ff,fontSize:10,color:MU,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>{label}</div>
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <input type="range" min={min} max={max} value={themeEdit[key]??def}
-                    onChange={e=>setThemeEdit({...themeEdit,[key]:parseInt(e.target.value)})}
-                    style={{flex:1}}/>
-                  <span style={{fontFamily:ff,fontSize:12,color:TX,minWidth:32,textAlign:"right"}}>{themeEdit[key]??def}px</span>
-                </div>
-              </div>
-            ))}
-          </div>
           <SH>Border Radius</SH>
-          <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:20}}>
-            <input type="range" min={0} max={16} value={themeEdit.borderRadius??4} onChange={e=>setThemeEdit({...themeEdit,borderRadius:parseInt(e.target.value)})} style={{flex:1}}/>
-            <span style={{fontFamily:ff,fontSize:13,color:TX,minWidth:30}}>{themeEdit.borderRadius??4}px</span>
-          </div>
-          <SH>Global Lightness</SH>
-          <div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:10}}>Shift all colours toward black (left) or pastel/white (right).</div>
           <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:24}}>
-            <span style={{fontFamily:ff,fontSize:11,color:MU}}>Darker</span>
-            <input type="range" min={0} max={100} value={themeEdit.lightness??50} onChange={e=>setThemeEdit({...themeEdit,lightness:parseInt(e.target.value)})} style={{flex:1}}/>
-            <span style={{fontFamily:ff,fontSize:11,color:MU}}>Lighter</span>
-            <span style={{fontFamily:ff,fontSize:13,color:TX,minWidth:30}}>{themeEdit.lightness??50}</span>
+            <span style={{fontFamily:ff,fontSize:11,color:MU}}>Sharp</span>
+            <input type="range" min={0} max={16} value={themeEdit.borderRadius??4} onChange={e=>setThemeEdit({...themeEdit,borderRadius:parseInt(e.target.value)})} style={{flex:1}}/>
+            <span style={{fontFamily:ff,fontSize:11,color:MU}}>Rounded</span>
+            <span style={{fontFamily:ff,fontSize:12,color:TX,minWidth:28}}>{themeEdit.borderRadius??4}px</span>
           </div>
-          <SH>Presets</SH>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:20}}>
-            {COLOR_PRESETS.map(p=>(
-              <button key={p.name} onClick={()=>{const nt={...themeEdit,...p.theme};setThemeEdit(nt);onThemeChange(nt);}}
-                style={{padding:"8px 14px",background:"transparent",border:"1px solid "+BR,color:TX,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,display:"flex",alignItems:"center",gap:8}}>
-                <div style={{display:"flex",gap:3}}>{["accent","bg","green","red"].map(k=><div key={k} style={{width:10,height:10,borderRadius:2,background:p.theme[k]||"#888"}}/>)}</div>
-                {p.name}
-              </button>
-            ))}
-          </div>
-          <div style={{display:"flex",gap:10}}>
-            <button onClick={apply} style={{flex:1,padding:"11px 0",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>{saved?"APPLIED!":"APPLY"}</button>
-            <button onClick={reset} style={{padding:"11px 20px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius}}>Reset</button>
-          </div>
-        </div>
-      )}
-      {activeTab==="colours"&&(
-        <div>
+          <SH>Colours</SH>
           <Grid cols={2}>
             {[["Accent","accent"],["Background","bg"],["Surface","surface"],["Surface 2","surface2"],["Border","border"],["Text","text"],["Muted","muted"],["Red","red"],["Green","green"],["Yellow","yellow"]].map(([label,key])=>(
-              <div key={key} style={{marginBottom:12}}>
+              <div key={key} style={{marginBottom:10}}>
                 <div style={{fontFamily:ff,fontSize:10,color:MU,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>{label}</div>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <input type="color" value={themeEdit[key]||"#ffffff"} onChange={e=>setThemeEdit({...themeEdit,[key]:e.target.value})} style={{width:40,height:30,border:"none",background:"none",cursor:"pointer",padding:0}}/>
-                  <input type="text" value={themeEdit[key]||""} onChange={e=>setThemeEdit({...themeEdit,[key]:e.target.value})} style={{...inp,width:110,fontFamily:"monospace"}}/>
-                  <div style={{width:28,height:28,borderRadius:4,background:themeEdit[key]||"#888",border:"1px solid #333"}}/>
+                  <input type="color" value={themeEdit[key]||"#ffffff"} onChange={e=>setThemeEdit({...themeEdit,[key]:e.target.value})} style={{width:36,height:28,border:"none",background:"none",cursor:"pointer",padding:0}}/>
+                  <input type="text" value={themeEdit[key]||""} onChange={e=>setThemeEdit({...themeEdit,[key]:e.target.value})} style={{...inp,width:100,fontFamily:"monospace",fontSize:12}}/>
+                  <div style={{width:24,height:24,borderRadius:4,background:themeEdit[key]||"#888",border:"1px solid "+BR,flexShrink:0}}/>
                 </div>
               </div>
             ))}
           </Grid>
-          <button onClick={apply} style={{marginTop:16,width:"100%",padding:"11px 0",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>{saved?"APPLIED!":"APPLY COLOURS"}</button>
+          <div style={{display:"flex",gap:10,marginTop:24}}>
+            <button onClick={apply} style={{flex:1,padding:"11px 0",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>{saved?"APPLIED ✓":"APPLY"}</button>
+            <button onClick={reset} style={{padding:"11px 20px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius}}>Reset</button>
+          </div>
         </div>
       )}
       {activeTab==="staff"&&(
@@ -2327,78 +2298,6 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
             <span style={{fontFamily:ff,fontSize:13,color:MU}}>Total budgeted weekly wages: </span>
             <span style={{fontFamily:ff,fontSize:15,color:A,fontWeight:"bold"}}>{fmtD(staff.reduce((s,m)=>s+n(m.hourlyRate)*n(m.hoursPerWeek),0))}</span>
           </div>
-        </div>
-      )}
-      {activeTab==="targets"&&(
-        <div>
-          <div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:20,lineHeight:1.8}}>Set your financial targets. These auto-calculate against actuals every week and month, showing coloured progress bars and alerts.</div>
-          <SH>Margin Targets</SH>
-          <Grid>
-            {[
-              {key:"gross_margin_target",label:"Gross Margin Target (%)",hint:"Industry: 50–65%"},
-              {key:"net_margin_target",label:"Net Margin Target (%)",hint:"Healthy: 12–20%"},
-            ].map(({key,label,hint})=>(
-              <div key={key}>
-                <Fld label={<span style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:0.7}}>{label}</span>}>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <input type="number" value={targets[key]||""} onChange={e=>saveTargets({...targets,[key]:parseFloat(e.target.value)||0})} style={{...inp,width:80,textAlign:"right"}}/>
-                    <span style={{fontFamily:ff,fontSize:10,color:MU}}>%</span>
-                  </div>
-                </Fld>
-                <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:3}}>{hint}</div>
-              </div>
-            ))}
-          </Grid>
-          <SH>Cost Targets (% of Net Revenue)</SH>
-          <Grid>
-            {[
-              {key:"cogs_pct_target",label:"Max COGS %",hint:"Target: ≤35–45%"},
-              {key:"opex_pct_target",label:"Max OPEX %",hint:"Target: ≤20–30%"},
-              {key:"wages_pct_target",label:"Max Wages %",hint:"Target: ≤15–25%"},
-            ].map(({key,label,hint})=>(
-              <div key={key}>
-                <Fld label={<span style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:0.7}}>{label}</span>}>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <input type="number" value={targets[key]||""} onChange={e=>saveTargets({...targets,[key]:parseFloat(e.target.value)||0})} style={{...inp,width:80,textAlign:"right"}}/>
-                    <span style={{fontFamily:ff,fontSize:10,color:MU}}>%</span>
-                  </div>
-                </Fld>
-                <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:3}}>{hint}</div>
-              </div>
-            ))}
-          </Grid>
-          <SH>Discount Alerts</SH>
-          <Grid>
-            {[
-              {key:"promo_disc_rate_max",label:"Max Promo Discount Rate (%)",hint:"% of gross sales — above this triggers alert"},
-              {key:"refund_rate_max",label:"Max Refund Rate (%)",hint:"% of gross sales"},
-            ].map(({key,label,hint})=>(
-              <div key={key}>
-                <Fld label={<span style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:0.7}}>{label}</span>}>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <input type="number" value={targets[key]||""} onChange={e=>saveTargets({...targets,[key]:parseFloat(e.target.value)||0})} style={{...inp,width:80,textAlign:"right"}}/>
-                    <span style={{fontFamily:ff,fontSize:10,color:MU}}>%</span>
-                  </div>
-                </Fld>
-                <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:3}}>{hint}</div>
-              </div>
-            ))}
-          </Grid>
-          <SH>Service Recovery Thresholds</SH>
-          <Grid>
-            {[
-              {key:"service_recovery_max_orders",label:"Max Service Recovery Orders / Week",hint:"Above this, alert fires"},
-              {key:"service_recovery_cost_alert",label:"Alert if Cost Per Order Exceeds ($)",hint:"Average cost per service recovery order"},
-            ].map(({key,label,hint})=>(
-              <div key={key}>
-                <Fld label={<span style={{fontFamily:ff,fontSize:11,color:MU,textTransform:"uppercase",letterSpacing:0.7}}>{label}</span>}>
-                  <input type="number" value={targets[key]||""} onChange={e=>saveTargets({...targets,[key]:parseFloat(e.target.value)||0})} style={{...inp,width:100,textAlign:"right"}}/>
-                </Fld>
-                <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:3}}>{hint}</div>
-              </div>
-            ))}
-          </Grid>
-          <button onClick={()=>saveTargets({...DEFAULT_TARGETS})} style={{marginTop:16,padding:"8px 18px",background:"transparent",border:"1px solid "+MU,color:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius}}>Reset to defaults</button>
         </div>
       )}
       {activeTab==="shopify"&&(
@@ -3532,8 +3431,8 @@ function PasswordScreen({onAuth,labels}){
   return(
     <div style={{minHeight:"100vh",background:BG,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:ff}}>
       <div style={{textAlign:"center",marginBottom:52}}>
-        <div style={{fontSize:9,letterSpacing:6,color:MU,textTransform:"uppercase",marginBottom:14}}>{labels.header_brand}</div>
-        <div style={{fontSize:30,letterSpacing:5,color:TX,textTransform:"uppercase",fontWeight:"normal"}}>{labels.header_title}</div>
+        <div style={{fontSize:28,letterSpacing:5,color:A,textTransform:"uppercase",fontWeight:"normal",marginBottom:6}}>{labels.header_brand}</div>
+        <div style={{fontSize:10,letterSpacing:4,color:MU,textTransform:"uppercase"}}>{labels.header_title}</div>
         <div style={{width:36,height:1,background:A,margin:"18px auto 0"}}/>
       </div>
       <div style={{width:290}}>
@@ -3559,14 +3458,14 @@ function FullPageModal({title,icon,onClose,children}){
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <span style={{color:A,fontSize:18,fontWeight:"bold",fontFamily:ff}}>{icon}</span>
             <div>
-              <div style={{fontFamily:ff,fontSize:9,letterSpacing:4,color:A,textTransform:"uppercase",marginBottom:3}}>Finance Operations</div>
+              <div style={{fontFamily:ff,fontSize:9,letterSpacing:4,color:A,textTransform:"uppercase",marginBottom:3}}>ClearTrace</div>
               <h1 style={{margin:0,fontFamily:ff,fontSize:20,fontWeight:"normal",letterSpacing:2,color:TX,textTransform:"uppercase"}}>{title}</h1>
             </div>
           </div>
           <button onClick={onClose}
             style={{background:"transparent",border:"1px solid "+BR,color:MU,padding:"8px 14px",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}
             onMouseEnter={e=>e.currentTarget.style.borderColor=A} onMouseLeave={e=>e.currentTarget.style.borderColor=BR}>
-            ← Back to P&L
+            ← Back
           </button>
         </div>
       </div>
@@ -3792,7 +3691,7 @@ function RosterCalculatorModal({onClose,curWeeks,monthData,settings,onSaveRoster
             </button>
             <button onClick={onClose} style={{background:"transparent",border:"1px solid "+BR,color:MU,padding:"8px 14px",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}
               onMouseEnter={e=>e.currentTarget.style.borderColor=A} onMouseLeave={e=>e.currentTarget.style.borderColor=BR}>
-              ← Back to P&L
+              ← Back
             </button>
           </div>
         </div>
@@ -4297,12 +4196,12 @@ function App(){
           <div style={{maxWidth:1200,margin:"0 auto",padding:"20px 0 0"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",flexWrap:"wrap",gap:12}}>
               <div>
-                <div style={{color:A,fontSize:szHeaderBrand,letterSpacing:4,textTransform:"uppercase",marginBottom:4}}>
-                  <E value={labels.header_brand} onSave={v=>labels._save("header_brand",v)} style={{color:A,fontFamily:ffTitle,fontSize:szHeaderBrand}}/>
-                </div>
-                <h1 style={{margin:0,fontSize:szHeaderTitle,fontWeight:"normal",letterSpacing:2,color:TX,textTransform:"uppercase",fontFamily:ffTitle}}>
-                  <E value={labels.header_title} onSave={v=>labels._save("header_title",v)} style={{color:TX,fontFamily:ffTitle,fontSize:szHeaderTitle}}/>
+                <h1 style={{margin:0,fontSize:szHeaderTitle,fontWeight:"normal",letterSpacing:3,color:A,textTransform:"uppercase",fontFamily:ffTitle}}>
+                  <E value={labels.header_brand} onSave={v=>labels._save("header_brand",v)} style={{color:A,fontFamily:ffTitle,fontSize:szHeaderTitle}}/>
                 </h1>
+                <div style={{color:MU,fontSize:szHeaderBrand,letterSpacing:4,textTransform:"uppercase",marginTop:3}}>
+                  <E value={labels.header_title} onSave={v=>labels._save("header_title",v)} style={{color:MU,fontFamily:ffTitle,fontSize:szHeaderBrand}}/>
+                </div>
               </div>
               <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
                 <select value={selIdx} onChange={e=>{setSelIdx(parseInt(e.target.value));setActiveWeek(0);}}
