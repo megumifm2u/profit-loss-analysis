@@ -1139,8 +1139,8 @@ function ShopifyImport({week,onChange,labels,settings}){
 
   const pullFromShopify=async()=>{
     const creds=settings?.shopify;
-    if(!creds?.clientId||!creds?.clientSecret){
-      setPullMsg("Add your Shopify credentials in Settings → Shopify first");setPullOk(false);return;
+    if(!creds?.accessToken){
+      setPullMsg("Add your Shopify access token in Settings → Shopify first");setPullOk(false);return;
     }
     const parts=week.dateRange?.split(" - ");
     if(!parts||parts.length!==2){setPullMsg("No date range on this week");setPullOk(false);return;}
@@ -1150,8 +1150,7 @@ function ShopifyImport({week,onChange,labels,settings}){
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
-          clientId:creds.clientId,
-          clientSecret:creds.clientSecret,
+          accessToken:creds.accessToken,
           startDate:toISO(parts[0]),
           endDate:toISO(parts[1],true),
         }),
@@ -1199,7 +1198,7 @@ function ShopifyImport({week,onChange,labels,settings}){
     setDetail(parts);
     setTimeout(()=>{setMsg("");setDetail([]);},4000);
   }
-  const hasShopifyCreds=!!(settings?.shopify?.clientId&&settings?.shopify?.clientSecret);
+  const hasShopifyCreds=!!(settings?.shopify?.accessToken);
   return(
     <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"16px 18px",marginBottom:20}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -2194,7 +2193,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
   const [staff,setStaff]=useState(settings?.staff||DEFAULT_STAFF);
   const [targets,setTargets]=useState(labels?._targets||DEFAULT_TARGETS);
   const [saved,setSaved]=useState(false);
-  const [shopCreds,setShopCreds]=useState({clientId:settings?.shopify?.clientId||"",clientSecret:settings?.shopify?.clientSecret||""});
+  const [shopToken,setShopToken]=useState(settings?.shopify?.accessToken||"");
   const [shopMsg,setShopMsg]=useState("");
   const [shopMsgOk,setShopMsgOk]=useState(false);
   const [shopTesting,setShopTesting]=useState(false);
@@ -2207,14 +2206,13 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
   const removeStaff=id=>updateStaff(staff.filter(s=>s.id!==id));
   const editStaff=(id,f,v)=>updateStaff(staff.map(s=>s.id===id?{...s,[f]:v}:s));
   const saveTargets=nt=>{setTargets(nt);if(onLabelsSave)onLabelsSave("_targets",nt);};
-  const saveShopify=()=>{onSettingsChange({...settings,shopify:shopCreds});setShopMsg("Saved");setShopMsgOk(true);setTimeout(()=>setShopMsg(""),2500);};
+  const saveShopify=()=>{onSettingsChange({...settings,shopify:{accessToken:shopToken}});setShopMsg("Saved");setShopMsgOk(true);setTimeout(()=>setShopMsg(""),2500);};
   const testShopify=async()=>{
-    if(!shopCreds.clientId||!shopCreds.clientSecret){setShopMsg("Enter your Client ID and Secret first");setShopMsgOk(false);return;}
+    if(!shopToken.trim()){setShopMsg("Enter your access token first");setShopMsgOk(false);return;}
     setShopTesting(true);setShopMsg("Testing...");
     try{
-      // Use a tiny date range just to verify auth works
       const now=new Date(); const d=now.toISOString().split("T")[0];
-      const r=await fetch("/api/shopify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({clientId:shopCreds.clientId,clientSecret:shopCreds.clientSecret,startDate:d+"T00:00:00+10:00",endDate:d+"T01:00:00+10:00"})});
+      const r=await fetch("/api/shopify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({accessToken:shopToken.trim(),startDate:d+"T00:00:00+10:00",endDate:d+"T01:00:00+10:00"})});
       const j=await r.json();
       if(!r.ok){setShopMsg(j.error||"Connection failed");setShopMsgOk(false);}
       else{setShopMsg("Connected — Shopify is ready");setShopMsgOk(true);}
@@ -2412,14 +2410,10 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
           </div>
           <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"16px 18px",marginBottom:16}}>
             <div style={{fontFamily:ff,fontSize:9,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:14}}>Credentials</div>
-            <Grid>
-              <Fld label="Client ID">
-                <input value={shopCreds.clientId} onChange={e=>setShopCreds({...shopCreds,clientId:e.target.value})} style={inp} placeholder="shpca_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autoComplete="off"/>
-              </Fld>
-              <Fld label="Client Secret">
-                <input type="password" value={shopCreds.clientSecret} onChange={e=>setShopCreds({...shopCreds,clientSecret:e.target.value})} style={inp} placeholder="shpcs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autoComplete="new-password"/>
-              </Fld>
-            </Grid>
+            <Fld label="Admin API Access Token">
+              <input type="password" value={shopToken} onChange={e=>setShopToken(e.target.value)} style={inp} placeholder="shpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autoComplete="new-password"/>
+            </Fld>
+            <div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:6,lineHeight:1.6}}>Found in Shopify Admin → Settings → Apps → your app → API credentials tab → Admin API access token (shown once after installing the app).</div>
             <div style={{display:"flex",alignItems:"center",gap:12,marginTop:16,flexWrap:"wrap"}}>
               <button onClick={saveShopify} style={{padding:"9px 22px",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>SAVE</button>
               <button onClick={testShopify} disabled={shopTesting} style={{padding:"9px 22px",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:11,cursor:shopTesting?"wait":"pointer",borderRadius:radius,letterSpacing:1,opacity:shopTesting?0.6:1}}>
