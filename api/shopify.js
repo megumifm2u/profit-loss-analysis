@@ -37,11 +37,10 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: `Could not reach ${store}: ${e.message}` });
   }
 
-  // Fetch orders across all statuses (avoids needing protected read_all_orders scope)
+  // Fetch open + closed orders only (cancelled/voided orders don't contribute to revenue)
   const allOrders = [];
-  for (const status of ["open", "closed", "cancelled"]) {
-    const fields = "id,line_items,total_discounts,shipping_lines,refunds,discount_codes,financial_status";
-    let nextUrl = `https://${store}/admin/api/${API_VERSION}/orders.json?status=${status}&created_at_min=${encodeURIComponent(startDate)}&created_at_max=${encodeURIComponent(endDate)}&limit=250&fields=${fields}`;
+  for (const status of ["open", "closed"]) {
+    let nextUrl = `https://${store}/admin/api/${API_VERSION}/orders.json?status=${status}&created_at_min=${encodeURIComponent(startDate)}&created_at_max=${encodeURIComponent(endDate)}&limit=250`;
 
     try {
       while (nextUrl) {
@@ -84,17 +83,8 @@ export default async function handler(req, res) {
       shippingIncome += parseFloat(sl.price || 0);
     }
     for (const refund of order.refunds || []) {
-      // Use transactions for the actual cash refunded (covers line items + shipping + adjustments)
-      for (const tx of refund.transactions || []) {
-        if (tx.kind === "refund" && (tx.status === "success" || tx.status === "pending")) {
-          refundAmount += parseFloat(tx.amount || 0);
-        }
-      }
-      // Fallback: if no transactions, sum refund_line_items subtotals
-      if (!(refund.transactions || []).length) {
-        for (const rli of refund.refund_line_items || []) {
-          refundAmount += parseFloat(rli.subtotal || 0);
-        }
+      for (const rli of refund.refund_line_items || []) {
+        refundAmount += parseFloat(rli.subtotal || 0);
       }
     }
     for (const dc of order.discount_codes || []) {
