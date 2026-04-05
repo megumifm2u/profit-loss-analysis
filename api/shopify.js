@@ -1,5 +1,5 @@
 // Vercel serverless function — Shopify data pull
-const STORE = "fm2uclothing.myshopify.com";
+const STORE = "a35aba-f9.myshopify.com";
 const API_VERSION = "2025-07";
 
 export default async function handler(req, res) {
