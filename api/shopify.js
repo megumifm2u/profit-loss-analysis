@@ -2,7 +2,7 @@
 const STORE = "fm2uclothing.myshopify.com";
 const API_VERSION = "2024-04";
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   res.setHeader("Content-Type", "application/json");
 
   if (req.method !== "POST") {
@@ -120,4 +120,4 @@ module.exports = async function handler(req, res) {
     orderCount: orders.length,
     discountCodes: Object.values(codeMap).sort((a, b) => b.amount - a.amount),
   });
-};
+}
