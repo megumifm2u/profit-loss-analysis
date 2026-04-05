@@ -198,6 +198,7 @@ const DISCOUNT_CODE_REGISTRY = [
   { id:"CS-ERROR",       category:"service_recovery", useCase:"We packed wrong item — replacement sent at our cost", plCategory:"Operational Error / COGS", hasCOGS:true, hasShipping:true },
   { id:"FM2USTAFF",      category:"staff",            useCase:"Staff purchases", plCategory:"Staff Benefit / COGS", hasCOGS:false, hasShipping:false },
   { id:"COLLAB2026",     category:"marketing",        useCase:"Marketing / Influencer collaboration", plCategory:"Customer Acquisition Cost (Marketing)", hasCOGS:false, hasShipping:true },
+  { id:"COLLAB100",      category:"marketing",        useCase:"Marketing / Influencer collaboration ($100 credit)", plCategory:"Customer Acquisition Cost (Marketing)", hasCOGS:false, hasShipping:true },
 ];
 
 const DISC_CATEGORIES = [
@@ -210,7 +211,7 @@ const DISC_CATEGORIES = [
 // ─── Discount Bucket Defaults ─────────────────────────────────────────────────
 const DEFAULT_DISC_BUCKETS = [
   { id:"service_recovery", labelKey:"disc_service_recovery", subKey:"disc_service_recovery_sub", reclassAs:"cogs",        defaultCodes:"RESHIP-FAULTY,RESHIP-LOST,RESHIP-DAMAGED,RESHIP-RTS,RESHIP-CUSTOMS,EXCHANGE-SE,EXCHANGE-GIFT,CS-WARRANTY,CS-ERROR", hasCOGS:true },
-  { id:"marketing",        labelKey:"disc_marketing",        subKey:"disc_marketing_sub",        reclassAs:"marketing",   defaultCodes:"COLLAB2026", hasCOGS:false },
+  { id:"marketing",        labelKey:"disc_marketing",        subKey:"disc_marketing_sub",        reclassAs:"marketing",   defaultCodes:"COLLAB2026,COLLAB100", hasCOGS:false },
   { id:"staff",            labelKey:"disc_staff",            subKey:"disc_staff_sub",            reclassAs:"wages",        defaultCodes:"FM2USTAFF", hasCOGS:false },
   { id:"promotional",      labelKey:"disc_promotional",      subKey:"disc_promotional_sub",      reclassAs:"promotional", defaultCodes:"", hasCOGS:false },
 ];
