@@ -1120,20 +1120,27 @@ function ShopifyImport({week,onChange,labels,settings}){
   const applyCodeData=(apiCodes,existing)=>{
     const normalise=s=>s.replace(/[-_\s]/g,"").toUpperCase();
     const newCodeData={...existing};
+    // Reset promo bucket fresh — don't accumulate from prior pulls
+    let promoOrders=0, promoAmount=0;
+    const promoCodes=[];
     apiCodes.forEach(({code,amount,orders})=>{
       const reg=DISCOUNT_CODE_REGISTRY.find(c=>c.id===code||normalise(c.id)===normalise(code));
       if(reg){
         newCodeData[reg.id]={...newCodeData[reg.id],orders:String(orders),retailValue:amount>0?String(amount.toFixed(2)):"",active:true};
       } else if(amount>0||orders>0){
-        const ex=newCodeData["__promo__"]||{};
-        newCodeData["__promo__"]={
-          ...ex,
-          orders:String((parseInt(ex.orders)||0)+orders),
-          retailValue:String(((parseFloat(ex.retailValue)||0)+amount).toFixed(2)),
-          customCodes:((ex.customCodes||"")+", "+code).replace(/^,\s*/,""),
-        };
+        promoOrders+=orders;
+        promoAmount+=amount;
+        promoCodes.push(code);
       }
     });
+    if(promoCodes.length>0){
+      newCodeData["__promo__"]={
+        ...(existing["__promo__"]||{}),
+        orders:String(promoOrders),
+        retailValue:String(promoAmount.toFixed(2)),
+        customCodes:promoCodes.join(", "),
+      };
+    }
     return newCodeData;
   };
 
