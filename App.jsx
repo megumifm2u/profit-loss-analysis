@@ -1139,8 +1139,8 @@ function ShopifyImport({week,onChange,labels,settings}){
 
   const pullFromShopify=async()=>{
     const creds=settings?.shopify;
-    if(!creds?.accessToken&&!(creds?.clientId&&creds?.clientSecret)){
-      setPullMsg("Add your Shopify credentials in Settings → Shopify first");setPullOk(false);return;
+    if(!creds?.accessToken){
+      setPullMsg("Connect Shopify in Settings → Shopify first");setPullOk(false);return;
     }
     const parts=week.dateRange?.split(" - ");
     if(!parts||parts.length!==2){setPullMsg("No date range on this week");setPullOk(false);return;}
@@ -1150,7 +1150,7 @@ function ShopifyImport({week,onChange,labels,settings}){
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
-          ...(creds.accessToken?{accessToken:creds.accessToken}:{clientId:creds.clientId,clientSecret:creds.clientSecret}),
+          accessToken:creds.accessToken,
           startDate:toISO(parts[0]),
           endDate:toISO(parts[1],true),
         }),
@@ -1198,7 +1198,7 @@ function ShopifyImport({week,onChange,labels,settings}){
     setDetail(parts);
     setTimeout(()=>{setMsg("");setDetail([]);},4000);
   }
-  const hasShopifyCreds=!!(settings?.shopify?.accessToken||(settings?.shopify?.clientId&&settings?.shopify?.clientSecret));
+  const hasShopifyCreds=!!settings?.shopify?.accessToken;
   return(
     <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"16px 18px",marginBottom:20}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -2193,9 +2193,9 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
   const [staff,setStaff]=useState(settings?.staff||DEFAULT_STAFF);
   const [targets,setTargets]=useState(labels?._targets||DEFAULT_TARGETS);
   const [saved,setSaved]=useState(false);
-  const [shopCreds,setShopCreds]=useState({clientId:settings?.shopify?.clientId||"",clientSecret:settings?.shopify?.clientSecret||"",accessToken:settings?.shopify?.accessToken||""});
-  const [shopMsg,setShopMsg]=useState("");
-  const [shopMsgOk,setShopMsgOk]=useState(false);
+  const [shopCreds,setShopCreds]=useState({accessToken:settings?.shopify?.accessToken||""});
+  const [shopMsg,setShopMsg]=useState(settings?.shopify?.accessToken?"Connected — Shopify is ready":"");
+  const [shopMsgOk,setShopMsgOk]=useState(!!settings?.shopify?.accessToken);
   const [shopTesting,setShopTesting]=useState(false);
   // Keep targets in sync when labels (loaded from storage) update
   useEffect(()=>{if(labels?._targets)setTargets({...DEFAULT_TARGETS,...labels._targets});},[labels?._targets]);
@@ -2207,17 +2207,14 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
   const editStaff=(id,f,v)=>updateStaff(staff.map(s=>s.id===id?{...s,[f]:v}:s));
   const saveTargets=nt=>{setTargets(nt);if(onLabelsSave)onLabelsSave("_targets",nt);};
   const saveShopify=()=>{onSettingsChange({...settings,shopify:shopCreds});setShopMsg("Saved");setShopMsgOk(true);setTimeout(()=>setShopMsg(""),2500);};
+  const disconnectShopify=()=>{const nc={...shopCreds,accessToken:""};setShopCreds(nc);onSettingsChange({...settings,shopify:nc});setShopMsg("Disconnected");setShopMsgOk(false);setTimeout(()=>setShopMsg(""),2500);};
   const testShopify=async()=>{
     const hasToken=shopCreds.accessToken?.trim();
-    const hasCreds=shopCreds.clientId?.trim()&&shopCreds.clientSecret?.trim();
-    if(!hasToken&&!hasCreds){setShopMsg("Enter your credentials first");setShopMsgOk(false);return;}
+    if(!hasToken){setShopMsg("No token — connect Shopify first");setShopMsgOk(false);return;}
     setShopTesting(true);setShopMsg("Testing...");
     try{
       const now=new Date(); const d=now.toISOString().split("T")[0];
-      const body=hasToken
-        ?{accessToken:shopCreds.accessToken.trim(),startDate:d+"T00:00:00+10:00",endDate:d+"T01:00:00+10:00"}
-        :{clientId:shopCreds.clientId.trim(),clientSecret:shopCreds.clientSecret.trim(),startDate:d+"T00:00:00+10:00",endDate:d+"T01:00:00+10:00"};
-      const r=await fetch("/api/shopify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+      const r=await fetch("/api/shopify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({accessToken:shopCreds.accessToken.trim(),startDate:d+"T00:00:00+10:00",endDate:d+"T01:00:00+10:00"})});
       const j=await r.json();
       if(!r.ok){setShopMsg(j.error||"Connection failed");setShopMsgOk(false);}
       else{setShopMsg("Connected — Shopify is ready");setShopMsgOk(true);}
@@ -2406,35 +2403,42 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
         <div>
           <SH>Shopify Integration</SH>
           <div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:20,lineHeight:1.8}}>
-            Connect your Shopify store so you can pull weekly revenue, orders, and discount code data with one click — no manual copy-paste needed.<br/>
-            <strong style={{color:TX}}>Where to find your credentials:</strong> Shopify Admin → Settings → Apps → Develop apps → Build apps in Dev Dashboard → open your app → Settings → Client credentials.
+            Connect your Shopify store so you can pull weekly revenue, orders, and discount code data with one click — no manual copy-paste needed.
           </div>
           <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"16px 18px",marginBottom:16}}>
             <div style={{fontFamily:ff,fontSize:9,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:14}}>Store</div>
             <div style={{fontFamily:ff,fontSize:13,color:TX,padding:"7px 10px",background:S2,border:"1px solid "+BR,borderRadius:radius,opacity:0.6}}>fm2uclothing.myshopify.com</div>
           </div>
           <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"16px 18px",marginBottom:16}}>
-            <div style={{fontFamily:ff,fontSize:9,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:14}}>Credentials</div>
-            <Grid>
-              <Fld label="Client ID">
-                <input value={shopCreds.clientId} onChange={e=>setShopCreds({...shopCreds,clientId:e.target.value})} style={inp} placeholder="df03cab1..." autoComplete="off"/>
-              </Fld>
-              <Fld label="Client Secret">
-                <input type="password" value={shopCreds.clientSecret} onChange={e=>setShopCreds({...shopCreds,clientSecret:e.target.value})} style={inp} placeholder="••••••••••••••••" autoComplete="new-password"/>
-              </Fld>
-            </Grid>
-            <div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:6,marginBottom:12,lineHeight:1.6}}>Found in your Shopify app → Settings → Credentials.</div>
-            <Fld label="Admin API Access Token (if available)">
-              <input type="password" value={shopCreds.accessToken} onChange={e=>setShopCreds({...shopCreds,accessToken:e.target.value})} style={inp} placeholder="shpat_xxxxxxx — leave blank if using Client ID + Secret" autoComplete="new-password"/>
-            </Fld>
-            <div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:6,lineHeight:1.6}}>If you have a direct access token it takes priority over Client ID + Secret.</div>
-            <div style={{display:"flex",alignItems:"center",gap:12,marginTop:16,flexWrap:"wrap"}}>
-              <button onClick={saveShopify} style={{padding:"9px 22px",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>SAVE</button>
-              <button onClick={testShopify} disabled={shopTesting} style={{padding:"9px 22px",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:11,cursor:shopTesting?"wait":"pointer",borderRadius:radius,letterSpacing:1,opacity:shopTesting?0.6:1}}>
-                {shopTesting?"TESTING...":"TEST CONNECTION"}
-              </button>
-              {shopMsg&&<span style={{fontFamily:ff,fontSize:12,color:shopMsgOk?GR:RD}}>{shopMsg}</span>}
-            </div>
+            <div style={{fontFamily:ff,fontSize:9,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:14}}>Connection</div>
+            {shopCreds.accessToken?(
+              <div>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:GR,flexShrink:0}}/>
+                  <span style={{fontFamily:ff,fontSize:13,color:GR,fontWeight:"bold"}}>Connected</span>
+                  <span style={{fontFamily:ff,fontSize:11,color:MU}}>fm2uclothing.myshopify.com</span>
+                </div>
+                <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                  <button onClick={testShopify} disabled={shopTesting} style={{padding:"9px 18px",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:11,cursor:shopTesting?"wait":"pointer",borderRadius:radius,letterSpacing:1,opacity:shopTesting?0.6:1}}>
+                    {shopTesting?"TESTING...":"TEST CONNECTION"}
+                  </button>
+                  <button onClick={disconnectShopify} style={{padding:"9px 18px",background:"transparent",border:"1px solid "+RD,color:RD,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1}}>DISCONNECT</button>
+                  {shopMsg&&<span style={{fontFamily:ff,fontSize:12,color:shopMsgOk?GR:RD,alignSelf:"center"}}>{shopMsg}</span>}
+                </div>
+              </div>
+            ):(
+              <div>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:MU,flexShrink:0}}/>
+                  <span style={{fontFamily:ff,fontSize:13,color:MU}}>Not connected</span>
+                </div>
+                <a href="/api/shopify-auth" style={{display:"inline-block",padding:"9px 22px",background:A,color:"#ffffff",fontFamily:ff,fontSize:11,textDecoration:"none",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>CONNECT WITH SHOPIFY</a>
+                <div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:10,lineHeight:1.6}}>
+                  Clicking connect will open Shopify for you to approve access. You'll be redirected back automatically.
+                </div>
+                {shopMsg&&<div style={{fontFamily:ff,fontSize:12,color:RD,marginTop:8}}>{shopMsg}</div>}
+              </div>
+            )}
           </div>
           <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"14px 18px"}}>
             <div style={{fontFamily:ff,fontSize:9,color:MU,letterSpacing:2,textTransform:"uppercase",marginBottom:10}}>What gets pulled automatically</div>
@@ -4138,9 +4142,20 @@ function App(){
     loadAll().then(({monthData:md,fixed:f,settings:s})=>{
       setMonthData(md||{});
       setFixed(f||emptyFixed(s?.opexKeys||DEFAULT_OPEX_KEYS));
-      setSettings(s||{});
-      if(s?.theme)setThemeRaw({...DEFAULT_THEME,...s.theme});
-      if(s?.labels)setLabelsRaw({...DEFAULT_LABELS,...s.labels});
+      // Check for Shopify OAuth token returned via URL param
+      const params=new URLSearchParams(window.location.search);
+      const shopifyToken=params.get("shopify_token");
+      let finalSettings=s||{};
+      if(shopifyToken){
+        finalSettings={...finalSettings,shopify:{...(finalSettings.shopify||{}),accessToken:shopifyToken}};
+        saveAll(md||{},f||emptyFixed(s?.opexKeys||DEFAULT_OPEX_KEYS),finalSettings);
+        // Clean token from URL without reload
+        const url=window.location.pathname+(params.get("shopify_error")?"?shopify_error="+params.get("shopify_error"):"");
+        window.history.replaceState({},"",url);
+      }
+      setSettings(finalSettings);
+      if(finalSettings?.theme)setThemeRaw({...DEFAULT_THEME,...finalSettings.theme});
+      if(finalSettings?.labels)setLabelsRaw({...DEFAULT_LABELS,...finalSettings.labels});
       setLoading(false);
     });
   },[authed]);
