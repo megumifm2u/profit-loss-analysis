@@ -1,5 +1,5 @@
 // Vercel serverless function — initiates Shopify OAuth flow
-const SCOPES = "read_orders,read_analytics";
+const SCOPES = "read_orders,read_reports";
 const REDIRECT_URI = "https://cleartrace-au.vercel.app/api/shopify-callback";
 
 export default function handler(req, res) {
