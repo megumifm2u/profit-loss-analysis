@@ -9,7 +9,8 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { accessToken, startDate, endDate } = req.body || {};
+  const { accessToken, shop, startDate, endDate } = req.body || {};
+  const store = shop || STORE;
 
   if (!accessToken) {
     return res.status(400).json({ error: "Missing Shopify access token. Connect Shopify in Settings first." });
@@ -27,7 +28,7 @@ export default async function handler(req, res) {
   const allOrders = [];
   for (const status of ["open", "closed", "cancelled"]) {
     const fields = "id,line_items,total_discounts,shipping_lines,refunds,discount_codes,financial_status";
-    let nextUrl = `https://${STORE}/admin/api/${API_VERSION}/orders.json?status=${status}&created_at_min=${encodeURIComponent(startDate)}&created_at_max=${encodeURIComponent(endDate)}&limit=250&fields=${fields}`;
+    let nextUrl = `https://${store}/admin/api/${API_VERSION}/orders.json?status=${status}&created_at_min=${encodeURIComponent(startDate)}&created_at_max=${encodeURIComponent(endDate)}&limit=250&fields=${fields}`;
 
     try {
       while (nextUrl) {
