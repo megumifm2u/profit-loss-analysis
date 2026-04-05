@@ -84,8 +84,17 @@ export default async function handler(req, res) {
       shippingIncome += parseFloat(sl.price || 0);
     }
     for (const refund of order.refunds || []) {
-      for (const rli of refund.refund_line_items || []) {
-        refundAmount += parseFloat(rli.subtotal || 0);
+      // Use transactions for the actual cash refunded (covers line items + shipping + adjustments)
+      for (const tx of refund.transactions || []) {
+        if (tx.kind === "refund" && (tx.status === "success" || tx.status === "pending")) {
+          refundAmount += parseFloat(tx.amount || 0);
+        }
+      }
+      // Fallback: if no transactions, sum refund_line_items subtotals
+      if (!(refund.transactions || []).length) {
+        for (const rli of refund.refund_line_items || []) {
+          refundAmount += parseFloat(rli.subtotal || 0);
+        }
       }
     }
     for (const dc of order.discount_codes || []) {
