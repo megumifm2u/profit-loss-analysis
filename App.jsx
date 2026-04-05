@@ -5555,19 +5555,42 @@ function App(){
 
   const curKey=selMonth?.key;
   const curEntry=monthData[curKey];
+  // Adjacent month keys for border-week sync
+  const _prevAdj=selMonth.month===0?{year:selMonth.year-1,month:11}:{year:selMonth.year,month:selMonth.month-1};
+  const _nextAdj=selMonth.month===11?{year:selMonth.year+1,month:0}:{year:selMonth.year,month:selMonth.month+1};
+  const _prevKey=monthKey(_prevAdj.year,_prevAdj.month);
+  const _nextKey=monthKey(_nextAdj.year,_nextAdj.month);
+  // Build a dateRange→week lookup from adjacent months so border weeks share data
+  const _adjWeekByRange={};
+  [...(monthData[_prevKey]?.weeks||[]),...(monthData[_nextKey]?.weeks||[])].forEach(w=>{_adjWeekByRange[w.dateRange]=w;});
   const curWeeks=(()=>{
     const wd=getMonthWeeks(selMonth.year,selMonth.month);
-    const saved=curEntry?.weeks;
-    if(!saved||saved.length===0) return wd.map(d=>emptyWeek(d.weekNum,d.dateRange,d.label,wageDepts,opexKeys));
-    if(saved.length>=wd.length) return saved;
-    // Saved data has fewer weeks than the calendar expects — append missing weeks as empty
-    const extra=wd.slice(saved.length).map(d=>emptyWeek(d.weekNum,d.dateRange,d.label,wageDepts,opexKeys));
-    return [...saved,...extra];
+    const saved=curEntry?.weeks||[];
+    return wd.map((d,i)=>{
+      if(saved[i]) return saved[i];
+      // No local data — pull from adjacent month if same week spans this boundary
+      const adj=_adjWeekByRange[d.dateRange];
+      if(adj) return{...adj,weekNum:d.weekNum,label:d.label};
+      return emptyWeek(d.weekNum,d.dateRange,d.label,wageDepts,opexKeys);
+    });
   })();
   const curExtras=curEntry?.extras||emptyExtras(opexKeys);
 
   const updateWeeks=nw=>{
-    const updated={...monthData,[curKey]:{...curEntry,weeks:nw,label:selMonth.label,lastSaved:new Date().toLocaleString("en-AU"),extras:curExtras}};
+    let updated={...monthData,[curKey]:{...curEntry,weeks:nw,label:selMonth.label,lastSaved:new Date().toLocaleString("en-AU"),extras:curExtras}};
+    // Sync border weeks (same dateRange) back to adjacent months that already have saved data
+    [_prevKey,_nextKey].forEach(adjKey=>{
+      const adjEntry=updated[adjKey];
+      if(!adjEntry?.weeks?.length) return;
+      let changed=false;
+      const adjWeeks=adjEntry.weeks.map(aw=>{
+        const match=nw.find(w=>w.dateRange===aw.dateRange);
+        if(!match) return aw;
+        changed=true;
+        return{...match,weekNum:aw.weekNum,label:aw.label};
+      });
+      if(changed) updated={...updated,[adjKey]:{...adjEntry,weeks:adjWeeks}};
+    });
     setMonthData(updated);autoSave(updated,fixed,settings);
   };
   const updateExtras=ne=>{
