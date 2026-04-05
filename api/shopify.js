@@ -60,7 +60,7 @@ export default async function handler(req, res) {
   // ── GraphQL Analytics — exact same figures as Shopify dashboard ────────────
   const analyticsQuery = `
     {
-      shopifyqlQuery(query: "SELECT sum(gross_sales) as gross_sales, sum(returns) as returns, sum(discounts) as discounts, sum(shipping_charges) as shipping_charges, count(orders) as orders_count FROM sales WHERE day >= '${startLocal}' AND day <= '${endLocal}'") {
+      shopifyqlQuery(query: "FROM sales SHOW gross_sales, returns, discounts, shipping, orders SINCE ${startLocal} UNTIL ${endLocal}") {
         parseErrors { code message }
         tableData {
           rowData
@@ -91,12 +91,15 @@ export default async function handler(req, res) {
       if (!parseErrors?.length && tableData?.rowData?.length) {
         const cols = tableData.columns.map(c => c.name);
         for (const row of tableData.rowData) {
-          const get = name => parseFloat(row[cols.indexOf(name)] || 0);
+          const get = name => {
+            const idx = cols.indexOf(name);
+            return idx >= 0 ? parseFloat(row[idx] || 0) : 0;
+          };
           grossSales    += get("gross_sales");
           refundAmount  += Math.abs(get("returns"));
           totalDiscounts+= Math.abs(get("discounts"));
-          shippingIncome+= get("shipping_charges");
-          orderCount    += get("orders_count");
+          shippingIncome+= get("shipping");
+          orderCount    += get("orders");
         }
         usedGraphQL = true;
       }
