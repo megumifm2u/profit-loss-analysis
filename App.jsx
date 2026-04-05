@@ -1151,7 +1151,7 @@ function ShopifyImport({week,onChange,labels,settings}){
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
           accessToken:creds.accessToken,
-          shop:creds.shop||"fm2uclothing.myshopify.com",
+          shop:creds.shop||"a35aba-f9.myshopify.com",
           startDate:toISO(parts[0]),
           endDate:toISO(parts[1],true),
         }),
@@ -2215,7 +2215,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
     setShopTesting(true);setShopMsg("Testing...");
     try{
       const now=new Date(); const d=now.toISOString().split("T")[0];
-      const r=await fetch("/api/shopify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({accessToken:shopCreds.accessToken.trim(),shop:shopCreds.shop||"fm2uclothing.myshopify.com",startDate:d+"T00:00:00+10:00",endDate:d+"T01:00:00+10:00"})});
+      const r=await fetch("/api/shopify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({accessToken:shopCreds.accessToken.trim(),shop:shopCreds.shop||"a35aba-f9.myshopify.com",startDate:d+"T00:00:00+10:00",endDate:d+"T01:00:00+10:00"})});
       const j=await r.json();
       if(!r.ok){setShopMsg(j.error||"Connection failed");setShopMsgOk(false);}
       else{setShopMsg("Connected — Shopify is ready");setShopMsgOk(true);}
@@ -2408,7 +2408,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
           </div>
           <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"16px 18px",marginBottom:16}}>
             <div style={{fontFamily:ff,fontSize:9,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:14}}>Store</div>
-            <div style={{fontFamily:ff,fontSize:13,color:TX,padding:"7px 10px",background:S2,border:"1px solid "+BR,borderRadius:radius,opacity:0.6}}>fm2uclothing.myshopify.com</div>
+            <div style={{fontFamily:ff,fontSize:13,color:TX,padding:"7px 10px",background:S2,border:"1px solid "+BR,borderRadius:radius,opacity:0.6}}>a35aba-f9.myshopify.com</div>
           </div>
           <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"16px 18px",marginBottom:16}}>
             <div style={{fontFamily:ff,fontSize:9,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:14}}>Connection</div>
@@ -2417,7 +2417,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
                 <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
                   <div style={{width:8,height:8,borderRadius:"50%",background:GR,flexShrink:0}}/>
                   <span style={{fontFamily:ff,fontSize:13,color:GR,fontWeight:"bold"}}>Connected</span>
-                  <span style={{fontFamily:ff,fontSize:11,color:MU}}>{shopCreds.shop||"fm2uclothing.myshopify.com"}</span>
+                  <span style={{fontFamily:ff,fontSize:11,color:MU}}>{shopCreds.shop||"a35aba-f9.myshopify.com"}</span>
                 </div>
                 <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
                   <button onClick={testShopify} disabled={shopTesting} style={{padding:"9px 18px",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:11,cursor:shopTesting?"wait":"pointer",borderRadius:radius,letterSpacing:1,opacity:shopTesting?0.6:1}}>
