@@ -57,6 +57,22 @@ export default async function handler(req, res) {
     return res.status(500).send("Token verification error: " + e.message);
   }
 
+  // Check what scopes were actually granted
+  let grantedScopes = "unknown";
+  try {
+    const scopeRes = await fetch(`https://${shop}/admin/oauth/access_scopes.json`, {
+      headers: { "X-Shopify-Access-Token": accessToken },
+    });
+    if (scopeRes.ok) {
+      const scopeData = await scopeRes.json();
+      grantedScopes = (scopeData.access_scopes || []).map(s => s.handle).join(",");
+    }
+  } catch(e) {}
+
+  if (!grantedScopes.includes("read_reports")) {
+    return res.status(400).send(`Token issued but missing read_reports scope. Granted scopes: ${grantedScopes}. Please check your app config in Partners Dashboard has read_reports in scopes, release the version, then try again.`);
+  }
+
   // Token verified — redirect back to the app
   res.redirect(302, `/?shopify_token=${encodeURIComponent(accessToken)}&shopify_shop=${encodeURIComponent(shop)}`);
 }
