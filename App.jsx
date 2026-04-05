@@ -1100,12 +1100,83 @@ function Accordion({title,children,defaultOpen=false,accent=false}){
 }
 
 // ─── Shopify Import ───────────────────────────────────────────────────────────
-function ShopifyImport({week,onChange,labels}){
+function ShopifyImport({week,onChange,labels,settings}){
   const {S2,BR,A,S,TX,ff,MU,GR,RD,radius}=useTheme();
   const bi=useBI();
   const [raw,setRaw]=useState(week.shopifyRaw||"");
   const [msg,setMsg]=useState("");
   const [detail,setDetail]=useState([]);
+  const [pulling,setPulling]=useState(false);
+  const [pullMsg,setPullMsg]=useState("");
+  const [pullOk,setPullOk]=useState(false);
+
+  // Parse DD/MM/YY date string to ISO with AEST offset
+  const toISO=(s,eod=false)=>{
+    const [d,m,y]=s.trim().split("/");
+    return `20${y}-${m.padStart(2,"0")}-${d.padStart(2,"0")}T${eod?"23:59:59":"00:00:00"}+10:00`;
+  };
+
+  // Apply discount codes from API response directly to week.codeData
+  const applyCodeData=(apiCodes,existing)=>{
+    const normalise=s=>s.replace(/[-_\s]/g,"").toUpperCase();
+    const newCodeData={...existing};
+    apiCodes.forEach(({code,amount,orders})=>{
+      const reg=DISCOUNT_CODE_REGISTRY.find(c=>c.id===code||normalise(c.id)===normalise(code));
+      if(reg){
+        newCodeData[reg.id]={...newCodeData[reg.id],orders:String(orders),retailValue:amount>0?String(amount.toFixed(2)):"",active:true};
+      } else if(amount>0||orders>0){
+        const ex=newCodeData["__promo__"]||{};
+        newCodeData["__promo__"]={
+          ...ex,
+          orders:String((parseInt(ex.orders)||0)+orders),
+          retailValue:String(((parseFloat(ex.retailValue)||0)+amount).toFixed(2)),
+          customCodes:((ex.customCodes||"")+", "+code).replace(/^,\s*/,""),
+        };
+      }
+    });
+    return newCodeData;
+  };
+
+  const pullFromShopify=async()=>{
+    const creds=settings?.shopify;
+    if(!creds?.clientId||!creds?.clientSecret){
+      setPullMsg("Add your Shopify credentials in Settings → Shopify first");setPullOk(false);return;
+    }
+    const parts=week.dateRange?.split(" - ");
+    if(!parts||parts.length!==2){setPullMsg("No date range on this week");setPullOk(false);return;}
+    setPulling(true);setPullMsg("Pulling from Shopify...");
+    try{
+      const res=await fetch("/api/shopify",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          clientId:creds.clientId,
+          clientSecret:creds.clientSecret,
+          startDate:toISO(parts[0]),
+          endDate:toISO(parts[1],true),
+        }),
+      });
+      const data=await res.json();
+      if(!res.ok){setPullMsg(data.error||"Pull failed");setPullOk(false);setPulling(false);return;}
+      const{revenue,orderCount,discountCodes}=data;
+      const newCodeData=applyCodeData(discountCodes||[],week.codeData||emptyCodeData());
+      onChange({
+        ...week,
+        revenue:{...week.revenue,
+          gross_sales:String(revenue.gross_sales),
+          refunds:String(revenue.refunds),
+          discounts:String(revenue.discounts),
+          shipping_income:String(revenue.shipping_income),
+        },
+        cogs:{...week.cogs,satchel_count:String(orderCount)},
+        codeData:newCodeData,
+      });
+      const codesFilled=(discountCodes||[]).length;
+      setPullMsg(`Filled — ${orderCount} orders · ${codesFilled} discount code${codesFilled!==1?"s":""}  mapped`);
+      setPullOk(true);
+    }catch(e){setPullMsg("Error: "+e.message);setPullOk(false);}
+    setPulling(false);
+  };
   function apply(){
     const parsed=parseShopify(raw);
     const rCount=Object.keys(parsed.revenue).length;
@@ -1128,12 +1199,29 @@ function ShopifyImport({week,onChange,labels}){
     setDetail(parts);
     setTimeout(()=>{setMsg("");setDetail([]);},4000);
   }
+  const hasShopifyCreds=!!(settings?.shopify?.clientId&&settings?.shopify?.clientSecret);
   return(
     <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"16px 18px",marginBottom:20}}>
-      <div style={{fontFamily:ff,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:A,marginBottom:8}}>
-        <E value={labels.sec_shopify} onSave={v=>labels._save("sec_shopify",v)} style={{fontFamily:ff,fontSize:10,color:A}}/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <div style={{fontFamily:ff,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:A}}>
+          <E value={labels.sec_shopify} onSave={v=>labels._save("sec_shopify",v)} style={{fontFamily:ff,fontSize:10,color:A}}/>
+        </div>
+        {hasShopifyCreds&&(
+          <button onClick={pullFromShopify} disabled={pulling}
+            style={{padding:"8px 18px",background:pulling?"transparent":A,border:"1px solid "+A,color:pulling?A:"#ffffff",fontFamily:ff,fontSize:11,cursor:pulling?"wait":"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1,opacity:pulling?0.7:1,display:"flex",alignItems:"center",gap:7}}>
+            {pulling&&<span style={{display:"inline-block",width:10,height:10,border:"2px solid "+A,borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.7s linear infinite"}}/>}
+            {pulling?"PULLING...":"PULL FROM SHOPIFY"}
+          </button>
+        )}
       </div>
-      <textarea value={raw} onChange={e=>setRaw(e.target.value)} placeholder="Paste Shopify CSV or tab-separated export here..." rows={4}
+      {pullMsg&&<div style={{fontFamily:ff,fontSize:11,color:pullOk?GR:RD,marginBottom:10,padding:"7px 10px",background:(pullOk?GR:RD)+"18",borderRadius:radius,border:"1px solid "+(pullOk?GR:RD)+"44"}}>{pullMsg}</div>}
+      {!hasShopifyCreds&&(
+        <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10,padding:"7px 10px",background:S,borderRadius:radius,border:"1px solid "+BR}}>
+          Add Shopify credentials in <strong style={{color:A}}>Settings → Shopify</strong> to enable one-click data pull.
+        </div>
+      )}
+      <div style={{fontFamily:ff,fontSize:9,color:MU,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>Or paste manually</div>
+      <textarea value={raw} onChange={e=>setRaw(e.target.value)} placeholder="Paste Shopify CSV or tab-separated export here..." rows={3}
         style={{width:"100%",boxSizing:"border-box",background:S,border:"1px solid "+BR,color:TX,padding:"10px 12px",fontFamily:"monospace",fontSize:12,outline:"none",borderRadius:radius,resize:"vertical"}}/>
       <div style={{display:"flex",alignItems:"center",gap:12,marginTop:10,flexWrap:"wrap"}}>
         <button onClick={apply} style={{padding:"8px 18px",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>
@@ -1485,7 +1573,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
 
   return(
     <div>
-      <ShopifyImport week={week} onChange={onChange} labels={labels}/>
+      <ShopifyImport week={week} onChange={onChange} labels={labels} settings={settings}/>
 
       <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between"}}>
         <div style={{flex:1}}><SH><E value={labels.sec_revenue} onSave={v=>labels._save("sec_revenue",v)} style={{color:"inherit",fontFamily:ff}}/></SH></div>
@@ -2106,6 +2194,10 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
   const [staff,setStaff]=useState(settings?.staff||DEFAULT_STAFF);
   const [targets,setTargets]=useState(labels?._targets||DEFAULT_TARGETS);
   const [saved,setSaved]=useState(false);
+  const [shopCreds,setShopCreds]=useState({clientId:settings?.shopify?.clientId||"",clientSecret:settings?.shopify?.clientSecret||""});
+  const [shopMsg,setShopMsg]=useState("");
+  const [shopMsgOk,setShopMsgOk]=useState(false);
+  const [shopTesting,setShopTesting]=useState(false);
   // Keep targets in sync when labels (loaded from storage) update
   useEffect(()=>{if(labels?._targets)setTargets({...DEFAULT_TARGETS,...labels._targets});},[labels?._targets]);
   const apply=()=>{onThemeChange(themeEdit);setSaved(true);setTimeout(()=>setSaved(false),2000);};
@@ -2115,12 +2207,26 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
   const removeStaff=id=>updateStaff(staff.filter(s=>s.id!==id));
   const editStaff=(id,f,v)=>updateStaff(staff.map(s=>s.id===id?{...s,[f]:v}:s));
   const saveTargets=nt=>{setTargets(nt);if(onLabelsSave)onLabelsSave("_targets",nt);};
+  const saveShopify=()=>{onSettingsChange({...settings,shopify:shopCreds});setShopMsg("Saved");setShopMsgOk(true);setTimeout(()=>setShopMsg(""),2500);};
+  const testShopify=async()=>{
+    if(!shopCreds.clientId||!shopCreds.clientSecret){setShopMsg("Enter your Client ID and Secret first");setShopMsgOk(false);return;}
+    setShopTesting(true);setShopMsg("Testing...");
+    try{
+      // Use a tiny date range just to verify auth works
+      const now=new Date(); const d=now.toISOString().split("T")[0];
+      const r=await fetch("/api/shopify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({clientId:shopCreds.clientId,clientSecret:shopCreds.clientSecret,startDate:d+"T00:00:00+10:00",endDate:d+"T01:00:00+10:00"})});
+      const j=await r.json();
+      if(!r.ok){setShopMsg(j.error||"Connection failed");setShopMsgOk(false);}
+      else{setShopMsg("Connected — Shopify is ready");setShopMsgOk(true);}
+    }catch(e){setShopMsg("Connection error: "+e.message);setShopMsgOk(false);}
+    setShopTesting(false);
+  };
   const inp={background:S2,border:"1px solid "+BR,color:TX,padding:"7px 10px",fontFamily:ff,fontSize:13,outline:"none",borderRadius:radius,width:"100%",boxSizing:"border-box"};
   const numInp={...inp,width:90,textAlign:"right"};
   return(
     <div>
       <div style={{display:"flex",gap:8,marginBottom:24,flexWrap:"wrap"}}>
-        {["appearance","colours","targets","staff"].map(t=>(
+        {["appearance","colours","targets","staff","shopify"].map(t=>(
           <button key={t} onClick={()=>setActiveTab(t)}
             style={{padding:"8px 16px",background:activeTab===t?A:"transparent",border:"1px solid "+(activeTab===t?A:BR),color:activeTab===t?"#ffffff":MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1,textTransform:"uppercase"}}>
             {t}
@@ -2291,6 +2397,53 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
             ))}
           </Grid>
           <button onClick={()=>saveTargets({...DEFAULT_TARGETS})} style={{marginTop:16,padding:"8px 18px",background:"transparent",border:"1px solid "+MU,color:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius}}>Reset to defaults</button>
+        </div>
+      )}
+      {activeTab==="shopify"&&(
+        <div>
+          <SH>Shopify Integration</SH>
+          <div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:20,lineHeight:1.8}}>
+            Connect your Shopify store so you can pull weekly revenue, orders, and discount code data with one click — no manual copy-paste needed.<br/>
+            <strong style={{color:TX}}>Where to find your credentials:</strong> Shopify Admin → Settings → Apps → Develop apps → Build apps in Dev Dashboard → open your app → Settings → Client credentials.
+          </div>
+          <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"16px 18px",marginBottom:16}}>
+            <div style={{fontFamily:ff,fontSize:9,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:14}}>Store</div>
+            <div style={{fontFamily:ff,fontSize:13,color:TX,padding:"7px 10px",background:S2,border:"1px solid "+BR,borderRadius:radius,opacity:0.6}}>fm2uclothing.myshopify.com</div>
+          </div>
+          <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"16px 18px",marginBottom:16}}>
+            <div style={{fontFamily:ff,fontSize:9,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:14}}>Credentials</div>
+            <Grid>
+              <Fld label="Client ID">
+                <input value={shopCreds.clientId} onChange={e=>setShopCreds({...shopCreds,clientId:e.target.value})} style={inp} placeholder="shpca_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autoComplete="off"/>
+              </Fld>
+              <Fld label="Client Secret">
+                <input type="password" value={shopCreds.clientSecret} onChange={e=>setShopCreds({...shopCreds,clientSecret:e.target.value})} style={inp} placeholder="shpcs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autoComplete="new-password"/>
+              </Fld>
+            </Grid>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginTop:16,flexWrap:"wrap"}}>
+              <button onClick={saveShopify} style={{padding:"9px 22px",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>SAVE</button>
+              <button onClick={testShopify} disabled={shopTesting} style={{padding:"9px 22px",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:11,cursor:shopTesting?"wait":"pointer",borderRadius:radius,letterSpacing:1,opacity:shopTesting?0.6:1}}>
+                {shopTesting?"TESTING...":"TEST CONNECTION"}
+              </button>
+              {shopMsg&&<span style={{fontFamily:ff,fontSize:12,color:shopMsgOk?GR:RD}}>{shopMsg}</span>}
+            </div>
+          </div>
+          <div style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"14px 18px"}}>
+            <div style={{fontFamily:ff,fontSize:9,color:MU,letterSpacing:2,textTransform:"uppercase",marginBottom:10}}>What gets pulled automatically</div>
+            {[
+              ["Revenue","Gross Sales, Refunds, Total Discounts, Shipping Income"],
+              ["COGS","Order count (→ Satchel Count)"],
+              ["Discount Codes","All codes used — mapped to your registry automatically"],
+            ].map(([cat,desc])=>(
+              <div key={cat} style={{display:"flex",gap:12,paddingBottom:8,borderBottom:"1px solid "+BR+"44",marginBottom:8}}>
+                <div style={{fontFamily:ff,fontSize:11,color:A,minWidth:100,fontWeight:"bold"}}>{cat}</div>
+                <div style={{fontFamily:ff,fontSize:11,color:MU}}>{desc}</div>
+              </div>
+            ))}
+            <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:8,lineHeight:1.7}}>
+              Tokens expire after 24 hours — a fresh one is fetched automatically every time you pull. Your credentials are stored locally and never shared.
+            </div>
+          </div>
         </div>
       )}
     </div>
