@@ -95,16 +95,18 @@ export default async function handler(req, res) {
     if (seen.has(o.id)) return false;
     seen.add(o.id);
     if (o.financial_status === "voided") return false;
-    if (o.source_name === "3890849") return false;
     return true;
   });
 
   // ── Aggregate ─────────────────────────────────────────────────────────────
   let grossSales = 0, totalDiscounts = 0, shippingIncome = 0, refundAmount = 0;
   const codeMap = {};
+  const refundSeenIds = new Set();
 
   for (const order of orders) {
     for (const li of order.line_items || []) {
+      // Exclude gift cards — Shopify analytics does not count these in Gross Sales
+      if (li.gift_card) continue;
       grossSales += parseFloat(li.price || 0) * (li.quantity || 0);
     }
     totalDiscounts += parseFloat(order.total_discounts || 0);
@@ -112,6 +114,8 @@ export default async function handler(req, res) {
       shippingIncome += parseFloat(sl.price || 0);
     }
     for (const refund of order.refunds || []) {
+      if (refundSeenIds.has(refund.id)) continue;
+      refundSeenIds.add(refund.id);
       for (const rli of refund.refund_line_items || []) {
         refundAmount += parseFloat(rli.subtotal || 0);
       }
@@ -122,6 +126,43 @@ export default async function handler(req, res) {
       if (!codeMap[code]) codeMap[code] = { code, amount: 0, orders: 0 };
       codeMap[code].amount += parseFloat(dc.amount || 0);
       codeMap[code].orders += 1;
+    }
+  }
+
+  // ── Fetch refunds processed this week on orders from ANY time ─────────────
+  // Shopify has no standalone refunds endpoint, so query orders updated this week
+  // with a refunded financial status and check each refund's created_at date
+  for (const fs of ["refunded", "partially_refunded"]) {
+    for (const status of ["open", "closed"]) {
+      let url =
+        `https://${store}/admin/api/${API_VERSION}/orders.json` +
+        `?status=${status}` +
+        `&financial_status=${fs}` +
+        `&updated_at_min=${encodeURIComponent(startUTC)}` +
+        `&updated_at_max=${encodeURIComponent(endUTC)}` +
+        `&limit=250`;
+      try {
+        while (url) {
+          const r = await fetch(url, { headers });
+          if (!r.ok) break;
+          const data = await r.json();
+          for (const order of data.orders || []) {
+            for (const refund of order.refunds || []) {
+              if (refundSeenIds.has(refund.id)) continue;
+              // Only count refunds whose created_at falls within our window
+              const refundTime = new Date(refund.created_at).getTime();
+              if (refundTime < new Date(startUTC).getTime() || refundTime > new Date(endUTC).getTime()) continue;
+              refundSeenIds.add(refund.id);
+              for (const rli of refund.refund_line_items || []) {
+                refundAmount += parseFloat(rli.subtotal || 0);
+              }
+            }
+          }
+          const link = r.headers.get("link") || "";
+          const next = link.match(/<([^>]+)>;\s*rel="next"/);
+          url = next ? next[1] : null;
+        }
+      } catch (e) { /* skip on error */ }
     }
   }
 
