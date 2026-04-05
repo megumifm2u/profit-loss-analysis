@@ -95,7 +95,6 @@ export default async function handler(req, res) {
     if (seen.has(o.id)) return false;
     seen.add(o.id);
     if (o.financial_status === "voided") return false;
-    if (o.source_name === "shopify_draft_order") return false;
     if (o.source_name === "3890849") return false;
     return true;
   });
