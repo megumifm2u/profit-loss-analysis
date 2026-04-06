@@ -1,5 +1,4 @@
 // Vercel serverless function — Shopify data pull
-const STORE = "";
 const API_VERSION = "2025-07";
 
 function localDateToUTC(dateStr, timeStr, ianaTimezone) {
@@ -22,10 +21,13 @@ export default async function handler(req, res) {
   }
 
   const { accessToken, shop, startDate, endDate } = req.body || {};
-  const store = shop || STORE;
+  const store = shop;
 
   if (!accessToken) {
     return res.status(400).json({ error: "Missing Shopify access token. Connect Shopify in Settings first." });
+  }
+  if (!store) {
+    return res.status(400).json({ error: "Missing shop domain." });
   }
   if (!startDate || !endDate) {
     return res.status(400).json({ error: "Missing date range." });
@@ -53,14 +55,15 @@ export default async function handler(req, res) {
   const startUTC = localDateToUTC(extractDate(startDate), "00:00:00", ianaTimezone);
   const endUTC   = localDateToUTC(extractDate(endDate),   "23:59:59", ianaTimezone);
 
-  // ── Fetch all orders ───────────────────────────────────────────────────────
+  // ── Fetch all orders — use processed_at to match Shopify Analytics attribution ──
+  // Shopify Analytics uses processed_at (payment date), not created_at
   const allOrders = [];
   for (const status of ["open", "closed"]) {
     let nextUrl =
       `https://${store}/admin/api/${API_VERSION}/orders.json` +
       `?status=${status}` +
-      `&created_at_min=${encodeURIComponent(startUTC)}` +
-      `&created_at_max=${encodeURIComponent(endUTC)}` +
+      `&processed_at_min=${encodeURIComponent(startUTC)}` +
+      `&processed_at_max=${encodeURIComponent(endUTC)}` +
       `&limit=250`;
     try {
       while (nextUrl) {
@@ -81,7 +84,7 @@ export default async function handler(req, res) {
     }
   }
 
-  // Deduplicate
+  // Deduplicate and exclude voided orders (Shopify Analytics excludes these)
   const seen = new Set();
   const orders = allOrders.filter(o => {
     if (seen.has(o.id)) return false;
@@ -89,36 +92,38 @@ export default async function handler(req, res) {
     return o.financial_status !== "voided";
   });
 
-  // ── Aggregate revenue — exclude draft orders from revenue but keep in count ──
-  // Shopify analytics counts draft-converted orders but excludes their pre-conversion
-  // draft values from gross sales
+  // ── Aggregate revenue — ALL orders (Shopify includes draft-converted orders) ──
   let grossSales = 0, totalDiscounts = 0, shippingIncome = 0;
   const codeMap = {};
 
-  // refundSeenIds declared here (outside all blocks) so it can be reused below
+  // refundSeenIds declared here so extended refund fetch can reuse it
   const refundSeenIds = new Set();
   let refundAmount = 0;
 
   for (const order of orders) {
-    const isDraft = order.source_name === "shopify_draft_order";
-
-    if (!isDraft) {
-      grossSales     += parseFloat(order.subtotal_price || 0) + parseFloat(order.total_discounts || 0);
-      totalDiscounts += parseFloat(order.total_discounts || 0);
-      for (const sl of order.shipping_lines || []) {
-        shippingIncome += parseFloat(sl.price || 0);
-      }
+    // Gross sales = price × qty before discounts = subtotal + discounts back
+    grossSales     += parseFloat(order.subtotal_price || 0) + parseFloat(order.total_discounts || 0);
+    totalDiscounts += parseFloat(order.total_discounts || 0);
+    for (const sl of order.shipping_lines || []) {
+      shippingIncome += parseFloat(sl.price || 0);
     }
 
-    // Refunds from all orders (draft or not)
+    // Refunds — line items + shipping adjustments
     for (const refund of order.refunds || []) {
       if (refundSeenIds.has(refund.id)) continue;
       refundSeenIds.add(refund.id);
       for (const rli of refund.refund_line_items || []) {
         refundAmount += parseFloat(rli.subtotal || 0);
       }
+      // Shipping refunds are in order_adjustments (not refund_line_items)
+      for (const adj of refund.order_adjustments || []) {
+        if (adj.kind === "shipping_refund") {
+          refundAmount += Math.abs(parseFloat(adj.amount || 0));
+        }
+      }
     }
 
+    // Discount codes
     for (const dc of order.discount_codes || []) {
       const code = (dc.code || "").toUpperCase();
       if (!code) continue;
@@ -128,7 +133,8 @@ export default async function handler(req, res) {
     }
   }
 
-  // ── Fetch refunds on OLDER orders that were refunded during this week ──────
+  // ── Fetch refunds on OLDER orders refunded during this week ──────────────
+  // Orders processed before this week that received refunds this week
   for (const fs of ["refunded", "partially_refunded"]) {
     for (const status of ["open", "closed"]) {
       let url =
@@ -146,11 +152,17 @@ export default async function handler(req, res) {
           for (const order of data.orders || []) {
             for (const refund of order.refunds || []) {
               if (refundSeenIds.has(refund.id)) continue;
+              // Only count refunds that were processed within this week
               const refundTime = new Date(refund.created_at).getTime();
               if (refundTime < new Date(startUTC).getTime() || refundTime > new Date(endUTC).getTime()) continue;
               refundSeenIds.add(refund.id);
               for (const rli of refund.refund_line_items || []) {
                 refundAmount += parseFloat(rli.subtotal || 0);
+              }
+              for (const adj of refund.order_adjustments || []) {
+                if (adj.kind === "shipping_refund") {
+                  refundAmount += Math.abs(parseFloat(adj.amount || 0));
+                }
               }
             }
           }
@@ -163,9 +175,7 @@ export default async function handler(req, res) {
   }
 
   const r2 = v => Math.round(v * 100) / 100;
-
-  const draftCount  = orders.filter(o => o.source_name === "shopify_draft_order").length;
-  const revenueCount = orders.filter(o => o.source_name !== "shopify_draft_order" && o.financial_status !== "voided").length;
+  const draftCount = orders.filter(o => o.source_name === "shopify_draft_order").length;
 
   return res.status(200).json({
     revenue: {
@@ -176,6 +186,13 @@ export default async function handler(req, res) {
     },
     orderCount: orders.length,
     discountCodes: Object.values(codeMap).sort((a, b) => b.amount - a.amount),
-    _debug: { timezone: ianaTimezone, startUTC, endUTC, totalOrders: orders.length, draftOrders: draftCount, revenueOrders: revenueCount },
+    _debug: {
+      timezone: ianaTimezone,
+      startUTC,
+      endUTC,
+      queryMode: "processed_at",
+      totalOrders: orders.length,
+      draftOrders: draftCount,
+    },
   });
 }
