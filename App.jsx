@@ -1110,7 +1110,6 @@ function ShopifyImport({week,onChange,labels,settings}){
   const [pulling,setPulling]=useState(false);
   const [pullMsg,setPullMsg]=useState("");
   const [pullOk,setPullOk]=useState(false);
-  const [pullPreview,setPullPreview]=useState(null); // {revenue, orderCount, discountCodes}
 
   // Parse DD/MM/YY date string to ISO with AEST offset
   const toISO=(s,eod=false)=>{
@@ -1160,7 +1159,7 @@ function ShopifyImport({week,onChange,labels,settings}){
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
           accessToken:creds.accessToken,
-          shop:creds.shop||"a35aba-f9.myshopify.com",
+          shop:creds.shop,
           startDate:toISO(parts[0]),
           endDate:toISO(parts[1],true),
         }),
@@ -1168,19 +1167,21 @@ function ShopifyImport({week,onChange,labels,settings}){
       const data=await res.json();
       if(!res.ok){setPullMsg(data.error||"Pull failed");setPullOk(false);setPulling(false);return;}
       const{revenue,orderCount,discountCodes}=data;
-      // Show preview with editable fields before applying
-      setPullPreview({
+      // Apply directly — no preview step
+      const newCodeData=applyCodeData(discountCodes||[],week.codeData||emptyCodeData());
+      onChange({
+        ...week,
         revenue:{
+          ...week.revenue,
           gross_sales:String(revenue.gross_sales),
           refunds:String(revenue.refunds),
           discounts:String(revenue.discounts),
           shipping_income:String(revenue.shipping_income),
         },
-        orderCount:String(orderCount),
-        discountCodes,
+        cogs:{...week.cogs,satchel_count:String(orderCount)},
+        codeData:newCodeData,
       });
-      const codesFilled=(discountCodes||[]).length;
-      setPullMsg(`Review pulled data below — adjust if needed, then click Apply`);
+      setPullMsg(`Filled — ${orderCount} orders · ${(discountCodes||[]).length} codes mapped`);
       setPullOk(true);
     }catch(e){setPullMsg("Error: "+e.message);setPullOk(false);}
     setPulling(false);
@@ -1199,12 +1200,12 @@ function ShopifyImport({week,onChange,labels,settings}){
       cogs:{...week.cogs,...parsed.cogs},
       opex:{...week.opex,...parsed.opex},
     });
-    const parts=[];
-    if(rCount)parts.push(rCount+" revenue");
-    if(cCount)parts.push(cCount+" COGS");
-    if(oCount)parts.push(oCount+" OPEX");
+    const ps=[];
+    if(rCount)ps.push(rCount+" revenue");
+    if(cCount)ps.push(cCount+" COGS");
+    if(oCount)ps.push(oCount+" OPEX");
     setMsg("Auto-filled "+total+" fields");
-    setDetail(parts);
+    setDetail(ps);
     setTimeout(()=>{setMsg("");setDetail([]);},4000);
   }
   const hasShopifyCreds=!!settings?.shopify?.accessToken;
@@ -1223,50 +1224,6 @@ function ShopifyImport({week,onChange,labels,settings}){
         )}
       </div>
       {pullMsg&&<div style={{fontFamily:ff,fontSize:11,color:pullOk?GR:RD,marginBottom:10,padding:"7px 10px",background:(pullOk?GR:RD)+"18",borderRadius:radius,border:"1px solid "+(pullOk?GR:RD)+"44"}}>{pullMsg}</div>}
-      {pullPreview&&(
-        <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+2,padding:"14px 16px",marginBottom:14}}>
-          <div style={{fontFamily:ff,fontSize:9,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:12}}>Review & Adjust Before Applying</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-            {[
-              {label:"Gross Sales",key:"gross_sales"},
-              {label:"Refunds",key:"refunds"},
-              {label:"Discounts",key:"discounts"},
-              {label:"Shipping Income",key:"shipping_income"},
-            ].map(({label,key})=>(
-              <div key={key}>
-                <div style={{fontFamily:ff,fontSize:9,color:MU,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>{label}</div>
-                <input type="number" step="0.01"
-                  value={pullPreview.revenue[key]}
-                  onChange={e=>setPullPreview(p=>({...p,revenue:{...p.revenue,[key]:e.target.value}}))}
-                  style={{width:"100%",boxSizing:"border-box",background:S2,border:"1px solid "+BR,color:TX,padding:"6px 10px",fontFamily:ff,fontSize:13,outline:"none",borderRadius:radius}}
-                />
-              </div>
-            ))}
-            <div>
-              <div style={{fontFamily:ff,fontSize:9,color:MU,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Order Count</div>
-              <input type="number"
-                value={pullPreview.orderCount}
-                onChange={e=>setPullPreview(p=>({...p,orderCount:e.target.value}))}
-                style={{width:"100%",boxSizing:"border-box",background:S2,border:"1px solid "+BR,color:TX,padding:"6px 10px",fontFamily:ff,fontSize:13,outline:"none",borderRadius:radius}}
-              />
-            </div>
-          </div>
-          <div style={{display:"flex",gap:10}}>
-            <button onClick={()=>{
-              const newCodeData=applyCodeData(pullPreview.discountCodes||[],week.codeData||emptyCodeData());
-              onChange({
-                ...week,
-                revenue:{...week.revenue,...pullPreview.revenue},
-                cogs:{...week.cogs,satchel_count:pullPreview.orderCount},
-                codeData:newCodeData,
-              });
-              setPullPreview(null);
-              setPullMsg(`Applied — ${pullPreview.orderCount} orders · ${(pullPreview.discountCodes||[]).length} codes mapped`);
-            }} style={{padding:"8px 20px",background:A,border:"none",color:"#ffffff",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,fontWeight:"bold",letterSpacing:1}}>APPLY</button>
-            <button onClick={()=>{setPullPreview(null);setPullMsg("");}} style={{padding:"8px 14px",background:"transparent",border:"1px solid "+BR,color:MU,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius}}>Cancel</button>
-          </div>
-        </div>
-      )}
       {!hasShopifyCreds&&(
         <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10,padding:"7px 10px",background:S,borderRadius:radius,border:"1px solid "+BR}}>
           Add Shopify credentials in <strong style={{color:A}}>Settings → Shopify</strong> to enable one-click data pull.
