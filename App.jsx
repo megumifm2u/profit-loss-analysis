@@ -2341,7 +2341,6 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
   const addContractor=()=>updateContractors([...contractors,{id:"c"+Date.now(),name:"New Contractor",billingType:"fixed",fixedWeeklyRate:0,hourlyRate:0,defaultTaskHours:{customerService:0,marketing:0,virtualAssistance:0}}]);
   const removeContractor=id=>updateContractors(contractors.filter(c=>c.id!==id));
   const editContractor=(id,f,v)=>updateContractors(contractors.map(c=>c.id===id?{...c,[f]:v}:c));
-  const editContractorTask=(id,task,v)=>updateContractors(contractors.map(c=>c.id===id?{...c,defaultTaskHours:{...c.defaultTaskHours,[task]:v}}:c));
   const saveTargets=nt=>{setTargets(nt);if(onLabelsSave)onLabelsSave("_targets",nt);};
   const saveShopify=()=>{onSettingsChange({...settings,shopify:shopCreds});setShopMsg("Saved");setShopMsgOk(true);setTimeout(()=>setShopMsg(""),2500);};
   const disconnectShopify=()=>{const nc={...shopCreds,accessToken:""};setShopCreds(nc);onSettingsChange({...settings,shopify:nc});setShopMsg("Disconnected");setShopMsgOk(false);setTimeout(()=>setShopMsg(""),2500);};
@@ -2466,20 +2465,6 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
                     </div>
                   </div>
                   <button onClick={()=>removeContractor(ct.id)} style={{background:"transparent",border:"1px solid "+RD,color:RD,padding:"6px 10px",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,alignSelf:"end"}}>-</button>
-                </div>
-                <div style={{fontFamily:ff,fontSize:10,color:MU,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Default Task Hours / Week</div>
-                <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10,lineHeight:1.6}}>
-                  {ct.billingType==="fixed"
-                    ?"Sets the default allocation split — overridable in the weekly input. Costs are allocated to each department proportionally."
-                    :"Default hours per task — overridable in the weekly input. Total hours × rate = weekly cost."
-                  }
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-                  {[["customerService","Customer Service"],["marketing","Marketing"],["virtualAssistance","Virtual Assistance"]].map(([task,label])=>(
-                    <Fld key={task} label={label+" (hrs)"}>
-                      <input type="number" min={0} value={ct.defaultTaskHours?.[task]||0} onChange={e=>editContractorTask(ct.id,task,parseFloat(e.target.value)||0)} style={inp}/>
-                    </Fld>
-                  ))}
                 </div>
               </div>
             ))}
