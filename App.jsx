@@ -171,10 +171,10 @@ const DEFAULT_LABELS = {
   disc_field_cogs:"Manufacturing COGS of goods sent ($)",
   disc_field_codes:"Discount codes in this bucket (comma separated)",
   // Buttons
-  btn_generate_export:"WEEKLY ANALYSIS EXPORT", btn_generate_export_sub:"surgical week review — paste into claude",
-  btn_monthly_export:"MONTHLY ANALYSIS EXPORT", btn_monthly_export_sub:"trend & strategy review — paste into claude",
+  btn_generate_export:"WEEKLY ANALYSIS EXPORT", btn_generate_export_sub:"surgical week review",
+  btn_monthly_export:"MONTHLY ANALYSIS EXPORT", btn_monthly_export_sub:"trend & strategy review",
   btn_monthly_summary:"Generate Monthly Summary", btn_monthly_summary_sub:"copy for notion / export",
-  btn_compare_export:"GENERATE EXPORT", btn_compare_export_sub:"comparative analysis export for claude",
+  btn_compare_export:"GENERATE EXPORT", btn_compare_export_sub:"comparative analysis export",
   btn_weekly_budget_export:"GENERATE BUDGET PLAN", btn_weekly_budget_export_sub:"next week staffing and budget guide",
   // Fixed costs
   fixed_help:"Enter recurring costs and mark which ones auto-populate weekly OPEX. Click SET FIXED to enable.",
@@ -252,11 +252,9 @@ const DEFAULT_WAGE_DEPTS = [
     {key:"ops_cs",label:"Customer Service"},
   ]},
   {key:"marketing",label:"Marketing",subs:[{key:"marketing_dept",label:"Marketing"}]},
-  {key:"hr",label:"HR & General Management",subs:[{key:"hr_management",label:"HR & General Management"}]},
   {key:"super",label:"Superannuation",subs:[
     {key:"super_ops",label:"Operations"},
     {key:"super_marketing",label:"Marketing"},
-    {key:"super_hr",label:"HR & Management"},
   ]},
 ];
 
@@ -264,6 +262,18 @@ const DEFAULT_STAFF = [
   {id:"s1",name:"Staff Member 1",type:"fulltime",hourlyRate:25,hoursPerWeek:38,dept:"ops_retail"},
   {id:"s2",name:"Staff Member 2",type:"parttime",hourlyRate:25,hoursPerWeek:20,dept:"ops_logistics"},
 ];
+
+// Independent contractors — separate from staff (no PAYG, no super)
+// billingType: "fixed" (set invoice per week) | "hourly" (hours × rate)
+// defaultTaskHours: default hours per task type for the week (can be overridden in weekly input)
+const DEFAULT_CONTRACTORS = [];
+
+// Maps contractor task types to wage department keys for P&L allocation
+const CONTRACTOR_TASK_DEPTS = {
+  customerService:   "ops_cs",
+  marketing:         "marketing_dept",
+  virtualAssistance: "ops_operations",
+};
 
 const allWageKeys = depts => (depts||DEFAULT_WAGE_DEPTS).flatMap(d=>d.subs.map(s=>s.key));
 
@@ -337,6 +347,7 @@ function emptyWeek(weekNum,dateRange,label,depts,opexKeys){
     codeData:emptyCodeData(),
     wages:emptyWages(depts),
     opex:emptyOpex(opexKeys),
+    contractors:{}, // { [contractorId]: { rateOverride:"", taskHours:{customerService:"",marketing:"",virtualAssistance:""} } }
     weekTargets:null, // per-week targets override, null = use global
   };
 }
@@ -363,7 +374,7 @@ function calcDiscReclassification(discBuckets){
   };
 }
 
-function calcWeek(week,fixed,opexKeys,depts){
+function calcWeek(week,fixed,opexKeys,depts,contractors){
   const r=week.revenue;
   const gross=n(r.gross_sales), refunds=n(r.refunds), totalDiscounts=n(r.discounts);
   const shipInc=n(r.shipping_income), ppFees=n(r.paypal_fees);
@@ -418,7 +429,38 @@ function calcWeek(week,fixed,opexKeys,depts){
 
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   // Staff discount reclassified as wages/staff benefit
-  const totalWages=allWageKeys(wDepts).reduce((s,k)=>s+n(week.wages?.[k]||0),0)+dr.staffDisc;
+  const manualWages=allWageKeys(wDepts).reduce((s,k)=>s+n(week.wages?.[k]||0),0)+dr.staffDisc;
+
+  // Independent contractor allocations — costs split across departments by task hours
+  const contractorDeptAllocations={};
+  let totalContractorWages=0;
+  for(const ct of (contractors||[])){
+    const wc=week.contractors?.[ct.id]||{};
+    const csHrs=n(wc.taskHours?.customerService??ct.defaultTaskHours?.customerService??0);
+    const mktHrs=n(wc.taskHours?.marketing??ct.defaultTaskHours?.marketing??0);
+    const vaHrs=n(wc.taskHours?.virtualAssistance??ct.defaultTaskHours?.virtualAssistance??0);
+    const totalHrs=csHrs+mktHrs+vaHrs;
+    let ctCost=0;
+    if(ct.billingType==="fixed"){
+      ctCost=n(wc.rateOverride||ct.fixedWeeklyRate||0);
+    }else{
+      ctCost=totalHrs*n(ct.hourlyRate||0);
+    }
+    if(ctCost>0){
+      totalContractorWages+=ctCost;
+      if(totalHrs>0){
+        const hrs={customerService:csHrs,marketing:mktHrs,virtualAssistance:vaHrs};
+        for(const [task,deptKey] of Object.entries(CONTRACTOR_TASK_DEPTS)){
+          const portion=(hrs[task]/totalHrs)*ctCost;
+          contractorDeptAllocations[deptKey]=(contractorDeptAllocations[deptKey]||0)+portion;
+        }
+      }else{
+        // No task breakdown — park in operations
+        contractorDeptAllocations["ops_operations"]=(contractorDeptAllocations["ops_operations"]||0)+ctCost;
+      }
+    }
+  }
+  const totalWages=manualWages+totalContractorWages;
 
   const totalFreight=keys.filter(k=>k.group==="freight"&&!k.sub).reduce((s,{key})=>s+getO(key),0);
   const totalCollabs=keys.filter(k=>k.group==="collabs").reduce((s,{key})=>s+getO(key),0);
@@ -434,6 +476,7 @@ function calcWeek(week,fixed,opexKeys,depts){
     gross, shipInc,
     truePromoDisc, totalDiscounts,
     discReclass:dr,
+    totalContractorWages, contractorDeptAllocations,
   };
 }
 
@@ -446,8 +489,8 @@ const _calcWeekOrig = calcWeek;
   // Patch happens at module scope post-definition
 })();
 
-function calcMonth(weeks,fixed,extras,opexKeys,depts){
-  const wc=weeks.map(w=>calcWeek(w,fixed,opexKeys,depts));
+function calcMonth(weeks,fixed,extras,opexKeys,depts,contractors){
+  const wc=weeks.map(w=>calcWeek(w,fixed,opexKeys,depts,contractors));
   const sum=f=>wc.reduce((s,c)=>s+c[f],0);
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const extraOpex=extras?keys.reduce((s,{key})=>s+n(extras.opex?.[key]),0):0;
@@ -1545,8 +1588,8 @@ function ClearAll({onClear}){
 }
 
 // ─── Week Form ────────────────────────────────────────────────────────────────
-function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,labels}){
-  const {S,S2,BR,A,MU,YL,RD,TX,ff,radius}=useTheme();
+function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,labels,contractors}){
+  const {S,S2,BR,A,MU,YL,RD,GR,TX,ff,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   const bi=useBI();
@@ -1554,7 +1597,10 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
   const upC=(k,v)=>onChange({...week,cogs:{...week.cogs,[k]:v}});
   const upO=(k,v)=>onChange({...week,opex:{...week.opex,[k]:v}});
   const upW=(k,v)=>onChange({...week,wages:{...week.wages,[k]:v}});
-  const c=calcWeek(week,fixed,keys,wDepts);
+  const ctrs=contractors||settings?.contractors||DEFAULT_CONTRACTORS;
+  const upContractor=(id,field,val)=>{const cur=week.contractors?.[id]||{};onChange({...week,contractors:{...(week.contractors||{}),[id]:{...cur,[field]:val}}});};
+  const upContractorTask=(id,task,val)=>{const cur=week.contractors?.[id]||{};const curT=cur.taskHours||{};onChange({...week,contractors:{...(week.contractors||{}),[id]:{...cur,taskHours:{...curT,[task]:val}}}});};
+  const c=calcWeek(week,fixed,keys,wDepts,ctrs);
   const satchelCost=week.cogs.satchel_cost_each||fixed?.satchelCostDefault||"0.85";
   const freightKeys=keys.filter(k=>k.group==="freight");
   const collabKeys=keys.filter(k=>k.group==="collabs");
@@ -1702,7 +1748,80 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
             ))}</Grid>
           </div>
         ))}
-        <Row><Badge small label="Total Wages" value={-c.totalWages} color={RD}/></Row>
+        <Row><Badge small label="Total Wages (staff)" value={-(c.totalWages-c.totalContractorWages)} color={RD}/></Row>
+
+        {/* ── Independent Contractors ── */}
+        {ctrs.length>0&&(
+          <div style={{marginTop:20,marginBottom:4}}>
+            <div style={{fontFamily:ff,fontSize:11,color:A,letterSpacing:1,textTransform:"uppercase",marginBottom:4,paddingBottom:4,borderBottom:"1px solid "+A+"33"}}>Independent Contractors</div>
+            <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:12}}>Costs are allocated to department wages based on task hours. Hourly contractors: enter task hours to compute pay.</div>
+            {ctrs.map(ct=>{
+              const wc=week.contractors?.[ct.id]||{};
+              const csHrs=n(wc.taskHours?.customerService??ct.defaultTaskHours?.customerService??0);
+              const mktHrs=n(wc.taskHours?.marketing??ct.defaultTaskHours?.marketing??0);
+              const vaHrs=n(wc.taskHours?.virtualAssistance??ct.defaultTaskHours?.virtualAssistance??0);
+              const totalHrs=csHrs+mktHrs+vaHrs;
+              let ctCost=0;
+              if(ct.billingType==="fixed"){ctCost=n(wc.rateOverride||ct.fixedWeeklyRate||0);}
+              else{ctCost=totalHrs*n(ct.hourlyRate||0);}
+              const fmtC=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
+              return(
+                <div key={ct.id} style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"14px 16px",marginBottom:12}}>
+                  {/* Header row */}
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <div>
+                      <span style={{fontFamily:ff,fontSize:13,color:TX,fontWeight:"bold"}}>{ct.name}</span>
+                      <span style={{fontFamily:ff,fontSize:11,color:MU,marginLeft:10}}>
+                        {ct.billingType==="fixed"?"Fixed invoice":"Hourly — $"+n(ct.hourlyRate).toFixed(2)+"/hr"}
+                      </span>
+                    </div>
+                    <div style={{fontFamily:ff,fontSize:15,color:ctCost>0?A:MU,fontWeight:"bold"}}>{ctCost>0?fmtC(ctCost):"—"}</div>
+                  </div>
+                  {/* Fixed billing: rate override */}
+                  {ct.billingType==="fixed"&&(
+                    <div style={{marginBottom:12}}>
+                      <Fld label={"Weekly Invoice — default "+fmtC(n(ct.fixedWeeklyRate))+" (override this week)"}>
+                        <CI value={wc.rateOverride||""} onChange={v=>upContractor(ct.id,"rateOverride",v)} placeholder={String(ct.fixedWeeklyRate||0)}/>
+                      </Fld>
+                    </div>
+                  )}
+                  {/* Task hours */}
+                  <div style={{fontFamily:ff,fontSize:10,color:MU,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>
+                    {ct.billingType==="fixed"?"Hours by Task (determines allocation)":"Hours by Task (determines pay + allocation)"}
+                  </div>
+                  <Grid>
+                    {[["customerService","Customer Service"],["marketing","Marketing"],["virtualAssistance","Virtual Assistance"]].map(([task,label])=>{
+                      const defaultVal=ct.defaultTaskHours?.[task]||0;
+                      const displayVal=wc.taskHours?.[task]!==undefined?wc.taskHours[task]:defaultVal;
+                      return(
+                        <Fld key={task} label={label+" (hrs)"}>
+                          <CI value={String(displayVal||"")} onChange={v=>upContractorTask(ct.id,task,v)} placeholder={String(defaultVal)}/>
+                        </Fld>
+                      );
+                    })}
+                  </Grid>
+                  {/* Allocation breakdown */}
+                  {ctCost>0&&totalHrs>0&&(
+                    <div style={{marginTop:10,padding:"8px 10px",background:A+"11",borderRadius:radius,display:"flex",gap:16,flexWrap:"wrap"}}>
+                      <span style={{fontFamily:ff,fontSize:10,color:MU,letterSpacing:0.5}}>Allocated to:</span>
+                      {[["customerService","Customer Svc","ops_cs"],[  "marketing","Marketing","marketing_dept"],["virtualAssistance","Virtual Assist","ops_operations"]].map(([task,label])=>{
+                        const hrs={customerService:csHrs,marketing:mktHrs,virtualAssistance:vaHrs}[task];
+                        if(!hrs)return null;
+                        const portion=(hrs/totalHrs)*ctCost;
+                        return<span key={task} style={{fontFamily:ff,fontSize:10,color:A}}>{label}: {fmtC(portion)} ({Math.round(hrs/totalHrs*100)}%)</span>;
+                      })}
+                    </div>
+                  )}
+                  {ctCost>0&&totalHrs===0&&(
+                    <div style={{marginTop:10,fontFamily:ff,fontSize:10,color:YL}}>⚠ Enter task hours to allocate cost to departments</div>
+                  )}
+                </div>
+              );
+            })}
+            <Row><Badge small label="Total Contractor Cost" value={-c.totalContractorWages} color={RD}/></Row>
+            <Row><Badge small label="Total Wages incl. Contractors" value={-c.totalWages} color={RD}/></Row>
+          </div>
+        )}
 
         <SH sub><E value={labels.sec_general} onSave={v=>labels._save("sec_general",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
         <Grid>{generalKeys.map(({key,label})=>opexField(key,label))}</Grid>
@@ -1748,6 +1867,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
           cogs:{manufacturing_product:"",manufacturing_shipping:"",satchel_count:"",satchel_cost_each:"",other_packaging:""},
           opex:emptyOpex(keys),
           wages:emptyWages(wDepts),
+          contractors:{},
           notes:"",
           discBuckets:emptyDiscBuckets(),
           codeData:emptyCodeData(),
@@ -2201,6 +2321,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
   const [themeEdit,setThemeEdit]=useState({...DEFAULT_THEME,...theme});
   const [activeTab,setActiveTab]=useState("appearance");
   const [staff,setStaff]=useState(settings?.staff||DEFAULT_STAFF);
+  const [contractors,setContractors]=useState(settings?.contractors||DEFAULT_CONTRACTORS);
   const [targets,setTargets]=useState(labels?._targets||DEFAULT_TARGETS);
   const [saved,setSaved]=useState(false);
   const [shopCreds,setShopCreds]=useState({accessToken:settings?.shopify?.accessToken||"",shop:settings?.shopify?.shop||""});
@@ -2216,6 +2337,11 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
   const addStaff=()=>updateStaff([...staff,{id:"s"+Date.now(),name:"New Staff",type:"casual",hourlyRate:25,hoursPerWeek:20,dept:"ops_retail"}]);
   const removeStaff=id=>updateStaff(staff.filter(s=>s.id!==id));
   const editStaff=(id,f,v)=>updateStaff(staff.map(s=>s.id===id?{...s,[f]:v}:s));
+  const updateContractors=nc=>{setContractors(nc);onSettingsChange({...settings,contractors:nc});};
+  const addContractor=()=>updateContractors([...contractors,{id:"c"+Date.now(),name:"New Contractor",billingType:"fixed",fixedWeeklyRate:0,hourlyRate:0,defaultTaskHours:{customerService:0,marketing:0,virtualAssistance:0}}]);
+  const removeContractor=id=>updateContractors(contractors.filter(c=>c.id!==id));
+  const editContractor=(id,f,v)=>updateContractors(contractors.map(c=>c.id===id?{...c,[f]:v}:c));
+  const editContractorTask=(id,task,v)=>updateContractors(contractors.map(c=>c.id===id?{...c,defaultTaskHours:{...c.defaultTaskHours,[task]:v}}:c));
   const saveTargets=nt=>{setTargets(nt);if(onLabelsSave)onLabelsSave("_targets",nt);};
   const saveShopify=()=>{onSettingsChange({...settings,shopify:shopCreds});setShopMsg("Saved");setShopMsgOk(true);setTimeout(()=>setShopMsg(""),2500);};
   const disconnectShopify=()=>{const nc={...shopCreds,accessToken:""};setShopCreds(nc);onSettingsChange({...settings,shopify:nc});setShopMsg("Disconnected");setShopMsgOk(false);setTimeout(()=>setShopMsg(""),2500);};
@@ -2289,7 +2415,9 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
       )}
       {activeTab==="staff"&&(
         <div>
-          <div style={{fontFamily:ff,fontSize:13,color:MU,marginBottom:20,lineHeight:1.8}}>Staff roster powers the budget planning section in weekly exports. Claude uses this to recommend next-week staffing based on actual vs budgeted wages.</div>
+          {/* ── Staff Members ── */}
+          <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:12}}>Staff Members</div>
+          <div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:16,lineHeight:1.7}}>PAYG employees — wages tracked by department in weekly input. Used to compare actual vs budgeted wages.</div>
           {staff.map(s=>(
             <div key={s.id} style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"14px 16px",marginBottom:12}}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr auto",gap:10,alignItems:"end"}}>
@@ -2306,6 +2434,62 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
           <div style={{marginTop:16,padding:"12px 16px",background:S2,border:"1px solid "+BR,borderRadius:radius+1}}>
             <span style={{fontFamily:ff,fontSize:13,color:MU}}>Total budgeted weekly wages: </span>
             <span style={{fontFamily:ff,fontSize:15,color:A,fontWeight:"bold"}}>{fmtD(staff.reduce((s,m)=>s+n(m.hourlyRate)*n(m.hoursPerWeek),0))}</span>
+          </div>
+
+          {/* ── Independent Contractors ── */}
+          <div style={{marginTop:32,paddingTop:24,borderTop:"1px solid "+BR+"55"}}>
+            <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:2,textTransform:"uppercase",marginBottom:12}}>Independent Contractors</div>
+            <div style={{fontFamily:ff,fontSize:12,color:MU,marginBottom:16,lineHeight:1.7}}>
+              No PAYG or super. Costs are allocated to departments based on task hours entered each week.
+              Fixed-rate contractors pull their weekly invoice from here; hourly contractors use task hours entered in the weekly input to compute their cost.
+            </div>
+            {contractors.map(ct=>(
+              <div key={ct.id} style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"14px 16px",marginBottom:12}}>
+                <div style={{display:"grid",gridTemplateColumns:"1.5fr 1fr 1fr 1fr auto",gap:10,alignItems:"end",marginBottom:12}}>
+                  <Fld label="Name"><input value={ct.name} onChange={e=>editContractor(ct.id,"name",e.target.value)} style={inp}/></Fld>
+                  <Fld label="Billing">
+                    <select value={ct.billingType} onChange={e=>editContractor(ct.id,"billingType",e.target.value)} style={inp}>
+                      <option value="fixed">Fixed Weekly Invoice</option>
+                      <option value="hourly">Hourly</option>
+                    </select>
+                  </Fld>
+                  {ct.billingType==="fixed"
+                    ?<Fld label="Weekly Invoice ($)"><input type="number" value={ct.fixedWeeklyRate} onChange={e=>editContractor(ct.id,"fixedWeeklyRate",parseFloat(e.target.value)||0)} style={inp}/></Fld>
+                    :<Fld label="$/hr"><input type="number" value={ct.hourlyRate} onChange={e=>editContractor(ct.id,"hourlyRate",parseFloat(e.target.value)||0)} style={inp}/></Fld>
+                  }
+                  <div>
+                    <div style={{fontFamily:ff,fontSize:10,color:MU,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>
+                      {ct.billingType==="fixed"?"Fixed/wk":"Rate"}
+                    </div>
+                    <div style={{fontFamily:ff,fontSize:14,color:GR,paddingTop:4}}>
+                      {ct.billingType==="fixed"?fmtD(n(ct.fixedWeeklyRate)):("$"+n(ct.hourlyRate).toFixed(2)+"/hr")}
+                    </div>
+                  </div>
+                  <button onClick={()=>removeContractor(ct.id)} style={{background:"transparent",border:"1px solid "+RD,color:RD,padding:"6px 10px",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,alignSelf:"end"}}>-</button>
+                </div>
+                <div style={{fontFamily:ff,fontSize:10,color:MU,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Default Task Hours / Week</div>
+                <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10,lineHeight:1.6}}>
+                  {ct.billingType==="fixed"
+                    ?"Sets the default allocation split — overridable in the weekly input. Costs are allocated to each department proportionally."
+                    :"Default hours per task — overridable in the weekly input. Total hours × rate = weekly cost."
+                  }
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                  {[["customerService","Customer Service"],["marketing","Marketing"],["virtualAssistance","Virtual Assistance"]].map(([task,label])=>(
+                    <Fld key={task} label={label+" (hrs)"}>
+                      <input type="number" min={0} value={ct.defaultTaskHours?.[task]||0} onChange={e=>editContractorTask(ct.id,task,parseFloat(e.target.value)||0)} style={inp}/>
+                    </Fld>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <button onClick={addContractor} style={{width:"100%",padding:"11px 0",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:12,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,marginTop:4}}>+ ADD CONTRACTOR</button>
+            {contractors.length>0&&(
+              <div style={{marginTop:16,padding:"12px 16px",background:S2,border:"1px solid "+BR,borderRadius:radius+1}}>
+                <span style={{fontFamily:ff,fontSize:13,color:MU}}>Total fixed contractor cost/week: </span>
+                <span style={{fontFamily:ff,fontSize:15,color:A,fontWeight:"bold"}}>{fmtD(contractors.filter(c=>c.billingType==="fixed").reduce((s,c)=>s+n(c.fixedWeeklyRate),0))}</span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -4047,6 +4231,7 @@ function App(){
     return {...stored,subs:[...storedSubs,...newSubs]};
   });
   const staff=settings?.staff||DEFAULT_STAFF;
+  const contractors=settings?.contractors||DEFAULT_CONTRACTORS;
   const theme=buildTheme(themeRaw);
 
   // Labels with save callback - saves into settings.labels so it persists
@@ -4163,8 +4348,8 @@ function App(){
   };
   const handleSaveMonthData=async md=>{setMonthData(md);await saveAll(md,fixed,settings);};
 
-  const calcs=useMemo(()=>curWeeks.map(w=>calcWeek(w,fixed,opexKeys,wageDepts)),[curWeeks,fixed,opexKeys,wageDepts]);
-  const mc=useMemo(()=>calcMonth(curWeeks,fixed,curExtras,opexKeys,wageDepts),[curWeeks,fixed,curExtras,opexKeys,wageDepts]);
+  const calcs=useMemo(()=>curWeeks.map(w=>calcWeek(w,fixed,opexKeys,wageDepts,contractors)),[curWeeks,fixed,opexKeys,wageDepts,contractors]);
+  const mc=useMemo(()=>calcMonth(curWeeks,fixed,curExtras,opexKeys,wageDepts,contractors),[curWeeks,fixed,curExtras,opexKeys,wageDepts,contractors]);
 
   // Data validation across all weeks in current month
   const dataWarnings=useMemo(()=>{
@@ -4181,7 +4366,7 @@ function App(){
     };
     window.addEventListener("keydown",handler);
     return()=>window.removeEventListener("keydown",handler);
-  },[tab,curWeeks,activeWeek,fixed,opexKeys,wageDepts,staff,labels,curEntry]);
+  },[tab,curWeeks,activeWeek,fixed,opexKeys,wageDepts,staff,labels,curEntry,contractors]);
 
   if(!authed)return(
     <ThemeContext.Provider value={theme}>
@@ -4275,7 +4460,7 @@ function App(){
                   <E value={selMonth?.label+" — "+(labels.header_subtitle||"weeks auto-dated Mon-Sun")} onSave={v=>labels._save("header_subtitle",v.includes("—")?v.split("—").slice(1).join("—").trim():v)} style={{fontFamily:ff,fontSize:11,color:MU}}/>
                 </div>
                 <button onClick={handleWeeklyExport}
-                  title="Weekly export for Claude analysis (Ctrl+E)"
+                  title="Weekly analysis export (Ctrl+E)"
                   style={{padding:"9px 16px",background:copied?A:"transparent",border:"1px solid "+A,color:copied?"#ffffff":A,fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,letterSpacing:1.5,textTransform:"uppercase"}}>
                   <E value={labels.btn_generate_export} onSave={v=>labels._save("btn_generate_export",v)} style={{fontFamily:ff,fontSize:11,color:copied?"#ffffff":A}}/>{copied?" ✓":""}
                 </button>
@@ -4308,7 +4493,7 @@ function App(){
                     onChange={updated=>{const nw=[...curWeeks];nw[activeWeek]=updated;updateWeeks(nw);}}
                     fixed={fixed} opexKeys={opexKeys} depts={wageDepts}
                     settings={settings} onSettingsChange={updateSettings}
-                    labels={labels}
+                    labels={labels} contractors={contractors}
                   />
                 </div>
               )}
