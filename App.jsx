@@ -1598,7 +1598,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
   const upC=(k,v)=>onChange({...week,cogs:{...week.cogs,[k]:v}});
   const upO=(k,v)=>onChange({...week,opex:{...week.opex,[k]:v}});
   const upW=(k,v)=>onChange({...week,wages:{...week.wages,[k]:v}});
-  const ctrs=contractors||settings?.contractors||DEFAULT_CONTRACTORS;
+  const ctrs=(contractors||settings?.contractors||DEFAULT_CONTRACTORS).filter(ct=>ct.active!==false);
   const upContractor=(id,field,val)=>{const cur=week.contractors?.[id]||{};onChange({...week,contractors:{...(week.contractors||{}),[id]:{...cur,[field]:val}}});};
   const upContractorTask=(id,task,val)=>{const cur=week.contractors?.[id]||{};const curT=cur.taskHours||{};onChange({...week,contractors:{...(week.contractors||{}),[id]:{...cur,taskHours:{...curT,[task]:val}}}});};
   const c=calcWeek(week,fixed,keys,wDepts,ctrs);
@@ -1791,6 +1791,8 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
                     </button>
                     <div style={{fontFamily:ff,fontSize:15,color:ctCost>0?A:MU,fontWeight:"bold"}}>{ctCost>0?fmtC(ctCost):"—"}</div>
                   </div>
+                  {week.contractors?.[ct.id]?.activeThisWeek !== false && (
+                  <>
                   {/* Fixed billing: rate override */}
                   {ct.billingType==="fixed"&&(
                     <div style={{marginBottom:12}}>
@@ -1828,6 +1830,8 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
                   )}
                   {ctCost>0&&totalHrs===0&&(
                     <div style={{marginTop:10,fontFamily:ff,fontSize:10,color:YL}}>⚠ Enter task hours to allocate cost to departments</div>
+                  )}
+                  </>
                   )}
                 </div>
               );
@@ -2458,7 +2462,7 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
             </div>
             {contractors.map(ct=>(
               <div key={ct.id} style={{background:S2,border:"1px solid "+BR,borderRadius:radius+2,padding:"14px 16px",marginBottom:12}}>
-                <div style={{display:"grid",gridTemplateColumns:"1.5fr 1fr 1fr 1fr auto",gap:10,alignItems:"end",marginBottom:12}}>
+                <div style={{display:"grid",gridTemplateColumns:"1.5fr 1fr 1fr 1fr auto auto",gap:10,alignItems:"end",marginBottom:12}}>
                   <Fld label="Name"><input value={ct.name} onChange={e=>editContractor(ct.id,"name",e.target.value)} style={inp}/></Fld>
                   <Fld label="Billing">
                     <select value={ct.billingType} onChange={e=>editContractor(ct.id,"billingType",e.target.value)} style={inp}>
@@ -2478,6 +2482,17 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
                       {ct.billingType==="fixed"?fmtD(n(ct.fixedWeeklyRate)):("$"+n(ct.hourlyRate).toFixed(2)+"/hr")}
                     </div>
                   </div>
+                  <button
+                    onClick={()=>editContractor(ct.id,"active", ct.active===false ? true : false)}
+                    style={{
+                      background:"transparent",
+                      border:"1px solid "+(ct.active===false ? RD : BR),
+                      color:ct.active===false ? RD : MU,
+                      padding:"4px 12px",fontFamily:ff,fontSize:10,cursor:"pointer",
+                      borderRadius:radius,letterSpacing:1,textTransform:"uppercase"
+                    }}>
+                    {ct.active===false ? "Inactive" : "Active"}
+                  </button>
                   <button onClick={()=>removeContractor(ct.id)} style={{background:"transparent",border:"1px solid "+RD,color:RD,padding:"6px 10px",fontFamily:ff,fontSize:11,cursor:"pointer",borderRadius:radius,alignSelf:"end"}}>-</button>
                 </div>
               </div>
