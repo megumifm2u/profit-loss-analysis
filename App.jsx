@@ -436,6 +436,7 @@ function calcWeek(week,fixed,opexKeys,depts,contractors){
   let totalContractorWages=0;
   for(const ct of (contractors||[])){
     const wc=week.contractors?.[ct.id]||{};
+    if(wc.activeThisWeek === false) continue;
     const csHrs=n(wc.taskHours?.customerService??ct.defaultTaskHours?.customerService??0);
     const mktHrs=n(wc.taskHours?.marketing??ct.defaultTaskHours?.marketing??0);
     const vaHrs=n(wc.taskHours?.virtualAssistance??ct.defaultTaskHours?.virtualAssistance??0);
@@ -1775,6 +1776,19 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
                         {ct.billingType==="fixed"?"Fixed invoice":"Hourly — $"+n(ct.hourlyRate).toFixed(2)+"/hr"}
                       </span>
                     </div>
+                    <button
+                      onClick={()=>upContractor(ct.id,"activeThisWeek",
+                        (week.contractors?.[ct.id]?.activeThisWeek !== false) ? false : true
+                      )}
+                      style={{
+                        background:"transparent",
+                        border:"1px solid "+(week.contractors?.[ct.id]?.activeThisWeek===false ? BR : A),
+                        color:week.contractors?.[ct.id]?.activeThisWeek===false ? MU : A,
+                        padding:"4px 12px",fontFamily:ff,fontSize:10,cursor:"pointer",
+                        borderRadius:radius,letterSpacing:1,textTransform:"uppercase"
+                      }}>
+                      {week.contractors?.[ct.id]?.activeThisWeek===false ? "Off this week" : "Active"}
+                    </button>
                     <div style={{fontFamily:ff,fontSize:15,color:ctCost>0?A:MU,fontWeight:"bold"}}>{ctCost>0?fmtC(ctCost):"—"}</div>
                   </div>
                   {/* Fixed billing: rate override */}
