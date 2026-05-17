@@ -595,22 +595,27 @@ async function loadAll(){
       }
     }catch(e){console.warn("JSONBin load failed",e);}
   }
-  // 2. Try Supabase
-  const sb=await loadFromSupabase();
-  if(sb&&validatePayload(sb)){
-    try{localStorage.setItem(STORAGE_KEY,JSON.stringify(sb));}catch(e){}
-    return sb;
-  }
-  // 3. Fall back to localStorage (try versioned keys)
+  // 2. Read localStorage before hitting Supabase
+  let localPayload=null;
   for(const key of[STORAGE_KEY,...STORAGE_FALLBACK_KEYS]){
     try{
       const raw=localStorage.getItem(key);
-      if(raw){
-        const parsed=safeParse(raw);
-        if(parsed)return parsed;
-      }
+      if(raw){const parsed=safeParse(raw);if(parsed){localPayload=parsed;break;}}
     }catch(e){}
   }
+  // 3. Try Supabase; merge with localStorage so neither source loses months
+  const sb=await loadFromSupabase();
+  if(sb&&validatePayload(sb)){
+    const merged={
+      monthData:{...(localPayload?.monthData||{}),...(sb.monthData||{})},
+      fixed:sb.fixed||null,
+      settings:sb.settings||null,
+    };
+    try{localStorage.setItem(STORAGE_KEY,JSON.stringify(merged));}catch(e){}
+    return merged;
+  }
+  // 4. Supabase failed or empty — use localStorage if available
+  if(localPayload)return localPayload;
   return{monthData:{},fixed:null,settings:null};
 }
 
