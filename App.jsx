@@ -1010,7 +1010,7 @@ function CI({value,onChange,placeholder="0.00",tint}){
     <div style={{position:"relative"}}>
       <span style={{position:"absolute",left:9,top:"50%",transform:"translateY(-50%)",color:MU,fontFamily:ff,fontSize:13,pointerEvents:"none"}}>$</span>
       <input type="number" value={value} onChange={e=>handleChange(e.target.value)} placeholder={placeholder}
-        min="0" max="10000000" step="0.01"
+        min="0" step="0.01"
         style={{...bi,paddingLeft:22,background:tint||S}} onFocus={e=>e.target.style.borderColor=A} onBlur={e=>e.target.style.borderColor=BR}/>
     </div>
   );
