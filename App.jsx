@@ -507,8 +507,7 @@ function calcMonth(weeks,fixed,extras,opexKeys,depts,contractors){
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
 const PASSWORD=import.meta.env.VITE_PASSWORD;
-const JSONBIN_ID=import.meta.env.VITE_JSONBIN_ID;
-const JSONBIN_KEY=import.meta.env.VITE_JSONBIN_KEY;
+
 
 // Storage version — bump when schema changes to force migration
 const STORAGE_KEY = "pl_v6";
@@ -577,25 +576,7 @@ async function saveToSupabase(payload){
 }
 
 async function loadAll(){
-  // 1. Try JSONBin (existing data)
-  if(JSONBIN_ID&&JSONBIN_KEY){
-    try{
-      const res=await fetch("https://api.jsonbin.io/v3/b/"+JSONBIN_ID+"/latest",{
-        headers:{"X-Master-Key":JSONBIN_KEY},
-        signal:AbortSignal.timeout(8000),
-      });
-      if(res.ok){
-        const d=await res.json();
-        if(d.record&&validatePayload(d.record)){
-          const payload={monthData:d.record.monthData||{},fixed:d.record.fixed||null,settings:d.record.settings||null};
-          saveToSupabase(payload);
-          try{localStorage.setItem(STORAGE_KEY,JSON.stringify(payload));}catch(e){}
-          return payload;
-        }
-      }
-    }catch(e){console.warn("JSONBin load failed",e);}
-  }
-  // 2. Read localStorage before hitting Supabase
+  // 1. Read localStorage before hitting Supabase
   let localPayload=null;
   for(const key of[STORAGE_KEY,...STORAGE_FALLBACK_KEYS]){
     try{
@@ -628,17 +609,6 @@ async function saveAll(monthData,fixed,settings){
   }
   // Save to Supabase (primary cloud)
   await saveToSupabase(payload);
-  // Also try JSONBin while it still works
-  if(JSONBIN_ID&&JSONBIN_KEY){
-    try{
-      await fetch("https://api.jsonbin.io/v3/b/"+JSONBIN_ID,{
-        method:"PUT",
-        headers:{"Content-Type":"application/json","X-Master-Key":JSONBIN_KEY},
-        body:JSON.stringify(payload),
-        signal:AbortSignal.timeout(10000),
-      });
-    }catch(e){}
-  }
 }
 
 // ─── Shopify Parser ───────────────────────────────────────────────────────────
