@@ -289,7 +289,8 @@ function getMonthWeeks(year,month){
     const mon=new Date(mon0); mon.setDate(mon0.getDate()+w*7);
     const sun=new Date(mon); sun.setDate(mon.getDate()+6);
     weeks.push({weekNum:w+1,label:"Week "+(w+1),dateRange:fmt(mon)+" - "+fmt(sun)});
-    // stop once this week's Monday is past the last day of the month
+    // stop once this week's Sunday is on or past the last day of the month
+    // (cross-month final weeks are expected and handled by the adjacent-month sync)
     if(sun>=lastDay)break;
   }
   return weeks;
@@ -4285,8 +4286,11 @@ function App(){
   const curWeeks=(()=>{
     const wd=getMonthWeeks(selMonth.year,selMonth.month);
     const saved=curEntry?.weeks||[];
-    return wd.map((d,i)=>{
-      if(saved[i]) return saved[i];
+    return wd.map((d)=>{
+      // Match by dateRange (not array index) so cross-month final weeks always
+      // find their saved data even when the month previously had fewer weeks stored.
+      const match=saved.find(s=>s.dateRange===d.dateRange);
+      if(match) return match;
       // No local data — pull from adjacent month if same week spans this boundary
       const adj=_adjWeekByRange[d.dateRange];
       if(adj) return{...adj,weekNum:d.weekNum,label:d.label};
