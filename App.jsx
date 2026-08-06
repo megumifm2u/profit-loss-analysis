@@ -426,7 +426,7 @@ function calcWeek(week,fixed,opexKeys,depts,contractors){
   // Exclude sub-keys from totals (they roll up into parent computed key)
   const totalOPEXBase=keys.filter(k=>!k.sub).reduce((s,{key})=>s+getO(key),0);
   // Marketing discount reclassified as marketing expense
-  const totalOPEX=totalOPEXBase+dr.marketingDisc;
+  let totalOPEX=totalOPEXBase+dr.marketingDisc;
 
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   // Staff discount reclassified as wages/staff benefit
@@ -463,11 +463,13 @@ function calcWeek(week,fixed,opexKeys,depts,contractors){
     }
   }
   const totalWages=manualWages+totalContractorWages;
+  // Wages now folded into Total OPEX (see fix above) — avoid double counting later.
+  totalOPEX+=totalWages;
 
   const totalFreight=keys.filter(k=>k.group==="freight"&&!k.sub).reduce((s,{key})=>s+getO(key),0);
   const totalCollabs=keys.filter(k=>k.group==="collabs").reduce((s,{key})=>s+getO(key),0);
 
-  const totalExpenses=totalCOGS+totalOPEX+totalWages;
+  const totalExpenses=totalCOGS+totalOPEX; // totalWages already included in totalOPEX above
   const netProfit=netRevenue-totalExpenses;
   const netMargin=netRevenue>0?(netProfit/netRevenue)*100:0;
 
