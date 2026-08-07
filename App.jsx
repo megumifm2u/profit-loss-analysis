@@ -245,20 +245,22 @@ const DEFAULT_OPEX_KEYS = [
 ];
 
 const DEFAULT_WAGE_DEPTS = [
+  {key:"ceo",label:"CEO",subs:[{key:"ceo_ceo",label:"CEO"}]},
   {key:"ops",label:"Operations Department",subs:[
     {key:"ops_operations",label:"Operations"},
     {key:"ops_logistics",label:"Logistics"},
     {key:"ops_retail",label:"Retail"},
     {key:"ops_cs",label:"Customer Service"},
-  ]},
+        ]},
   {key:"marketing",label:"Marketing",subs:[{key:"marketing_dept",label:"Marketing"}]},
+  {key:"fashion",label:"Fashion",subs:[{key:"fashion_technical_design",label:"Technical Design"}]},
   {key:"super",label:"Superannuation",subs:[
+    {key:"super_ceo",label:"CEO"},
     {key:"super_ops",label:"Operations"},
     {key:"super_marketing",label:"Marketing"},
-  ]},
-  {key:"ceo",label:"CEO",subs:[{key:"ceo_ceo",label:"CEO"}]},
-  {key:"fashion",label:"Fashion",subs:[{key:"fashion_technical_design",label:"Technical Design"}]},
-];
+    {key:"super_fashion",label:"Fashion"},
+        ]},
+    ];
 
 const DEFAULT_STAFF = [
   {id:"s1",name:"Staff Member 1",type:"fulltime",hourlyRate:25,hoursPerWeek:38,dept:"ops_retail"},
