@@ -256,6 +256,8 @@ const DEFAULT_WAGE_DEPTS = [
     {key:"super_ops",label:"Operations"},
     {key:"super_marketing",label:"Marketing"},
   ]},
+  {key:"ceo",label:"CEO",subs:[{key:"ceo_ceo",label:"CEO"}]},
+  {key:"fashion",label:"Fashion",subs:[{key:"fashion_technical_design",label:"Technical Design"}]},
 ];
 
 const DEFAULT_STAFF = [
@@ -1711,6 +1713,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
         <SH sub><E value={labels.sec_collabs} onSave={v=>labels._save("sec_collabs",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
         <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_collabs_sub} onSave={v=>labels._save("sec_collabs_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
         <Grid>{collabKeys.map(({key,label})=>opexField(key,label))}</Grid>
+        <Row><Badge small label="Influencer / Marketing Gifting (reclassified)" value={-(c.discReclass?.marketingDisc||0)} color={RD}/></Row>
         <Row><Badge small label="Total Collabs" value={-c.totalCollabs} color={RD}/></Row>
 
         <SH sub><E value={labels.sec_wages} onSave={v=>labels._save("sec_wages",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
