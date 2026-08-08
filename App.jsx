@@ -2606,7 +2606,12 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
   };
 
   const getProRatedWeeks=()=>{
-    if(!useRange||!rangeFrom||!rangeTo)return{weeks,factors:weeks.map(()=>1)};
+    if(!useRange||!rangeFrom||!rangeTo){
+            const [ky,km]=monthKey.split("-").map(Number);
+            const mFrom=new Date(ky,km-1,1),mTo=new Date(ky,km,0);
+            mTo.setHours(23,59,59);
+            return{weeks,factors:weeks.map(w=>calcFactor(w,mFrom,mTo))};
+    }
     const from=new Date(rangeFrom),to=new Date(rangeTo);
     to.setHours(23,59,59);
     const sourceWeeks=getAllWeeks();
