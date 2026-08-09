@@ -441,6 +441,7 @@ function calcWeek(week,fixed,opexKeys,depts,contractors){
   const contractorDeptAllocations={};
   let totalContractorWages=0;
   for(const ct of (contractors||[])){
+        if(ct.active===false) continue;
     const wc=week.contractors?.[ct.id]||{};
     if(wc.activeThisWeek === false) continue;
     const csHrs=n(wc.taskHours?.customerService??ct.defaultTaskHours?.customerService??0);
