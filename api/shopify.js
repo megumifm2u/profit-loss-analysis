@@ -165,13 +165,20 @@ export default async function handler(req, res) {
         shippingGross += shopMoney(sl.price_set, sl.price);
       }
 
-      // Discount codes
+      // Discount codes — Shopify can list the same code more than once per order
+      // (e.g. once per line item it was applied to, each with its own partial amount),
+      // so "orders used" must be deduplicated per-order or a single order inflates the
+      // usage count (this was the root cause of EXCHANGE-SE showing 8 orders instead of 2).
+      const orderCodesSeen = new Set();
       for (const dc of order.discount_codes || []) {
         const code = (dc.code || "").toUpperCase();
         if (!code) continue;
         if (!codeMap[code]) codeMap[code] = { code, amount: 0, orders: 0 };
         codeMap[code].amount += parseFloat(dc.amount || 0);
-        codeMap[code].orders += 1;
+        if (!orderCodesSeen.has(code)) {
+          orderCodesSeen.add(code);
+          codeMap[code].orders += 1;
+        }
       }
 
       // Per-day breakdown (Formula A, store timezone)
