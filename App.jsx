@@ -126,6 +126,7 @@ const DEFAULT_TARGETS = {
   net_margin_target: 15,        // %
   cogs_pct_target: 35,          // % of net revenue
   opex_pct_target: 25,          // % of net revenue
+  operating_costs_pct_target: 25,   // % of net revenue — OPEX EXCLUDING wages (see wages_pct_target for the wages half)
   wages_pct_target: 20,         // % of net revenue
   promo_disc_rate_max: 12,      // % of gross sales
   service_recovery_max_orders: 5, // orders per week before alert
@@ -223,26 +224,26 @@ const DEFAULT_OPEX_KEYS = [
   {key:"auspost_intl",label:"AusPost International",group:"freight",sub:true,parent:"auspost"},
   {key:"fedex",label:"FedEx / International",group:"freight"},
   {key:"customs_duties",label:"Customs and Duties",group:"freight"},
-  {key:"collab_shipping",label:"Collab Shipping",group:"collabs"},
-  {key:"collab_product_cogs",label:"Collab Product COGS",group:"collabs"},
-  {key:"uppromote_commission",label:"Uppromote Commission",group:"collabs"},
-  {key:"paid_collab_fees",label:"Paid Collaboration Fees",group:"collabs"},
-  {key:"office_costs",label:"Office Costs",group:"general"},
-  {key:"google_ms_admin",label:"Google / Microsoft Admin",group:"general"},
-  {key:"google_ads",label:"Google Ads",group:"general"},
-  {key:"meta_ads",label:"Meta Ads",group:"general"},
-  {key:"model_wages",label:"Model Wages",group:"general"},
-  {key:"shopify",label:"Shopify",group:"general"},
-  {key:"shopify_apps",label:"Shopify Apps",group:"general"},
-  {key:"general_apps",label:"General Apps",group:"general"},
-  {key:"accounting_xero",label:"Accounting (Xero)",group:"general"},
-  {key:"rostering_deputy",label:"Rostering (Deputy)",group:"general"},
-  {key:"customer_service_repliai",label:"Customer Service (Repliai)",group:"general"},
-  {key:"rent_utilities",label:"Rent + Utilities",group:"general"},
-  {key:"internet_phone",label:"Internet + Telephone",group:"general"},
-  {key:"insurance",label:"Insurance",group:"general"},
-  {key:"bank_accounting",label:"Bank / Accounting",group:"general"},
-  {key:"legal",label:"Legal",group:"general"},
+  {key:"collab_shipping",label:"Gifting Shipping",group:"gifting"},
+  {key:"collab_product_cogs",label:"Gifting COGS",group:"gifting"},
+  {key:"uppromote_commission",label:"Commissions (Uppromote)",group:"commissions"},
+  {key:"paid_collab_fees",label:"Retainer Fees",group:"retainer"},
+  {key:"office_costs",label:"Office Costs",group:"rent_fixed"},
+  {key:"google_ms_admin",label:"Google / Microsoft Admin",group:"software"},
+  {key:"google_ads",label:"Google Ads",group:"marketing"},
+  {key:"meta_ads",label:"Meta Ads",group:"marketing"},
+  {key:"model_wages",label:"Model Wages",group:"marketing"},
+  {key:"shopify",label:"Shopify",group:"software"},
+  {key:"shopify_apps",label:"Shopify Apps",group:"software"},
+  {key:"general_apps",label:"General Apps",group:"software"},
+  {key:"accounting_xero",label:"Accounting (Xero)",group:"software"},
+  {key:"rostering_deputy",label:"Rostering (Deputy)",group:"software"},
+  {key:"customer_service_repliai",label:"Customer Service (Repliai)",group:"software"},
+  {key:"rent_utilities",label:"Rent + Utilities",group:"rent_fixed"},
+  {key:"internet_phone",label:"Internet + Telephone",group:"rent_fixed"},
+  {key:"insurance",label:"Insurance",group:"rent_fixed"},
+  {key:"bank_accounting",label:"Bank / Accounting",group:"rent_fixed"},
+  {key:"legal",label:"Legal",group:"rent_fixed"},
 ];
 
 const DEFAULT_WAGE_DEPTS = [
@@ -422,16 +423,18 @@ function calcWeek(week,fixed,opexKeys,depts,contractors){
     }
     // Week-level override takes priority
     if(week.opex?.[k]!==""&&week.opex?.[k]!==undefined)return n(week.opex[k]);
+    // Fixed-cost carry-over is only legitimate for genuinely recurring costs (Rent + Utilities + Other Fixed Costs group) — never for software/marketing/gifting/commissions/retainer/freight fields, which must default to $0 each week.
+    const allowCarry=keyDef&&keyDef.group==="rent_fixed";
     // Weekly fixed cost (full amount each week)
-    if(fixed?.fixedKeys?.includes(k))return n(fixed?.values?.[k]);
+    if(allowCarry&&fixed?.fixedKeys?.includes(k))return n(fixed?.values?.[k]);
     // Monthly fixed cost (divided by 4 weeks)
-    if(fixed?.monthlyFixedKeys?.includes(k))return n(fixed?.monthlyValues?.[k])/4;
+    if(allowCarry&&fixed?.monthlyFixedKeys?.includes(k))return n(fixed?.monthlyValues?.[k])/4;
     return 0;
   };
   // Exclude sub-keys from totals (they roll up into parent computed key)
   const totalOPEXBase=keys.filter(k=>!k.sub).reduce((s,{key})=>s+getO(key),0);
   // Marketing discount reclassified as marketing expense
-  let totalOPEX=totalOPEXBase+dr.marketingDisc;
+  let totalOPEX=totalOPEXBase; // dr.marketingDisc (gifting/collab retail discount value) is intentionally excluded from OPEX — it is reporting-only context ("revenue given away"), not a cash cost. Real gifting cash cost already flows in via the Gifting COGS/Gifting Shipping opex keys inside totalOPEXBase.
 
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
   // Staff discount reclassified as wages/staff benefit
@@ -470,16 +473,30 @@ function calcWeek(week,fixed,opexKeys,depts,contractors){
   }
   const totalWages=manualWages+totalContractorWages;
   // Wages now folded into Total OPEX (see fix above) — avoid double counting later.
+  // "Reclassified to Expenses" = named real-cash components only (service recovery COGS + gifting COGS/shipping) — never a manual override.
+  const reclassifiedToExpenses=dr.serviceRecoveryCOGS+getO("collab_product_cogs")+getO("collab_shipping");
+  const totalOpexExclWages=totalOPEX; // captured before wages are folded in below, for Operating Costs % (see bug-fix note)
   totalOPEX+=totalWages;
 
   const totalFreight=keys.filter(k=>k.group==="freight"&&!k.sub).reduce((s,{key})=>s+getO(key),0);
-  const totalCollabs=keys.filter(k=>k.group==="collabs").reduce((s,{key})=>s+getO(key),0);
+  const totalCollabs=keys.filter(k=>["gifting","commissions","retainer"].includes(k.group)).reduce((s,{key})=>s+getO(key),0); // legacy aggregate name, now spans gifting+commissions+retainer
+  const totalGifting=keys.filter(k=>k.group==="gifting"&&!k.sub).reduce((s,{key})=>s+getO(key),0);
+  const totalCommissions=keys.filter(k=>k.group==="commissions"&&!k.sub).reduce((s,{key})=>s+getO(key),0);
+  const totalRetainer=keys.filter(k=>k.group==="retainer"&&!k.sub).reduce((s,{key})=>s+getO(key),0);
+  const totalRentFixed=keys.filter(k=>k.group==="rent_fixed"&&!k.sub).reduce((s,{key})=>s+getO(key),0);
+  const totalSoftware=keys.filter(k=>k.group==="software"&&!k.sub).reduce((s,{key})=>s+getO(key),0);
+  const totalMarketing=keys.filter(k=>k.group==="marketing"&&!k.sub).reduce((s,{key})=>s+getO(key),0);
+  const totalMarketingAdSpend=getO("google_ads")+getO("meta_ads");
+  const giftingCOGS=getO("collab_product_cogs");
+  const giftingShipping=getO("collab_shipping");
 
   const totalExpenses=totalCOGS+totalOPEX; // totalWages already included in totalOPEX above
   const netProfit=netRevenue-totalExpenses;
   const netMargin=netRevenue>0?(netProfit/netRevenue)*100:0;
 
   return {
+    totalOpexExclWages, reclassifiedToExpenses, giftingCOGS, giftingShipping,
+    totalGifting, totalCommissions, totalRetainer, totalRentFixed, totalSoftware, totalMarketing, totalMarketingAdSpend,
     netRevenue, totalCOGS, grossProfit, grossMargin, totalOPEX, totalWages,
     totalFreight, totalCollabs, totalExpenses, netProfit, netMargin,
     mfgP, mfgS, satchel, otherPkg, ppFees, refunds,
@@ -507,11 +524,17 @@ function calcMonth(weeks,fixed,extras,opexKeys,depts,contractors){
   const netRevenue=sum("netRevenue"), totalCOGS=sum("totalCOGS"), grossProfit=sum("grossProfit");
   const grossMargin=netRevenue>0?(grossProfit/netRevenue)*100:0;
   const totalFreight=sum("totalFreight"), totalCollabs=sum("totalCollabs"), totalWages=sum("totalWages");
+  const sumDR=f=>wc.reduce((s,c)=>s+((c.discReclass&&c.discReclass[f])||0),0);
+  const totalOpexExclWages=sum("totalOpexExclWages"), reclassifiedToExpenses=sum("reclassifiedToExpenses");
+  const giftingCOGS=sum("giftingCOGS"), giftingShipping=sum("giftingShipping"), totalContractorWages=sum("totalContractorWages");
+  const totalGifting=sum("totalGifting"), totalCommissions=sum("totalCommissions"), totalRetainer=sum("totalRetainer");
+  const totalRentFixed=sum("totalRentFixed"), totalSoftware=sum("totalSoftware"), totalMarketing=sum("totalMarketing"), totalMarketingAdSpend=sum("totalMarketingAdSpend");
+  const discReclass={serviceRecoveryCOGS:sumDR("serviceRecoveryCOGS"), marketingDisc:sumDR("marketingDisc"), staffDisc:sumDR("staffDisc")};
   const totalOPEX=sum("totalOPEX")+extraOpex;
   const totalExpenses=sum("totalExpenses")+extraOpex;
   const netProfit=netRevenue-totalExpenses;
   const netMargin=netRevenue>0?(netProfit/netRevenue)*100:0;
-  return {netRevenue,totalCOGS,grossProfit,grossMargin,totalFreight,totalCollabs,totalWages,totalOPEX,totalExpenses,netProfit,netMargin,weekCalcs:wc,extraOpex};
+  return {netRevenue,totalCOGS,grossProfit,grossMargin,totalFreight,totalCollabs,totalWages,totalOPEX,totalExpenses,netProfit,netMargin,weekCalcs:wc,extraOpex,totalOpexExclWages,reclassifiedToExpenses,giftingCOGS,giftingShipping,totalContractorWages,totalGifting,totalCommissions,totalRetainer,totalRentFixed,totalSoftware,totalMarketing,totalMarketingAdSpend,discReclass};
 }
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
@@ -699,8 +722,10 @@ function parseShopify(raw){
       const v=getNum(line); if(v!==null)opex.shopify_apps=v;
     } else if(low.includes("shopify")&&!low.includes("app")){
       const v=getNum(line); if(v!==null)opex.shopify=v;
-    } else if(low.includes("meta ad")||low.includes("tiktok ad")||low.includes("google ad")||low.includes("facebook ad")||(low.includes("paid ad"))){
-      const v=getNum(line); if(v!==null)opex.meta_tiktok_ads=v;
+    } else if(low.includes("google ad")){
+      const v=getNum(line); if(v!==null)opex.google_ads=v;
+    } else if(low.includes("meta ad")||low.includes("tiktok ad")||low.includes("facebook ad")||(low.includes("paid ad"))){
+      const v=getNum(line); if(v!==null)opex.meta_ads=v;
     } else if(low.includes("model wage")||low.includes("model cost")||low.includes("content creator wage")){
       const v=getNum(line); if(v!==null)opex.model_wages=v;
     } else if(low.includes("rent")&&(low.includes("util")||low.includes("electric")||low.includes("water"))){
@@ -733,12 +758,29 @@ function parseShopify(raw){
 
 
 // ─── Export ───────────────────────────────────────────────────────────────────
-function generateWeeklyExport(week,fixed,opexKeys,depts,staff,labels){
+// ─── Reconciliation Check (run before any export) ──────────────────────────────
+// Verifies calcWeek's internal totals are self-consistent before we let the user copy
+// an export out of the app. Catches the class of bug where a total silently drifts from
+// the sum of its named parts (e.g. the week-2 $647.58 missing-contractors incident).
+function reconcileWeek(c){
+  const EPS=0.01;
+  const issues=[];
+  const check=(label,expected,actual)=>{if(Math.abs(expected-actual)>EPS)issues.push({label,expected,actual,diff:actual-expected});};
+  const dr=c.discReclass||{};
+  check("Total Wages (staff+super+contractors)", (c.totalWages-c.totalContractorWages)+c.totalContractorWages, c.totalWages);
+  check("Reclassified to Expenses (service recovery COGS + gifting COGS/shipping)", (dr.serviceRecoveryCOGS||0)+(c.giftingCOGS||0)+(c.giftingShipping||0), c.reclassifiedToExpenses);
+  check("Total OPEX (operating costs + wages)", (c.totalOpexExclWages||0)+c.totalWages, c.totalOPEX);
+  check("Total Expenses (COGS + OPEX)", c.totalCOGS+c.totalOPEX, c.totalExpenses);
+  check("Net Profit (net revenue - total expenses)", c.netRevenue-c.totalExpenses, c.netProfit);
+  return {ok:issues.length===0, issues};
+}
+
+function generateWeeklyExport(week,fixed,opexKeys,depts,staff,labels,contractors){
   const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
   const pct=(v,b)=>b>0?((v/b)*100).toFixed(1)+"%":"0.0%";
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
-  const c=calcWeek(week,fixed,keys,wDepts);
+  const c=calcWeek(week,fixed,keys,wDepts,contractors);
   const targets=week.weekTargets||DEFAULT_TARGETS;
   const gross=n(week.revenue.gross_sales);
   const dr=c.discReclass||{};
@@ -750,9 +792,11 @@ function generateWeeklyExport(week,fixed,opexKeys,depts,staff,labels){
   const cogsPct=c.netRevenue>0?(c.totalCOGS/c.netRevenue)*100:0;
   const opexPct=c.netRevenue>0?(c.totalOPEX/c.netRevenue)*100:0;
   const wagesPct=c.netRevenue>0?(c.totalWages/c.netRevenue)*100:0;
+  const operatingCostsPct=c.netRevenue>0?((c.totalOpexExclWages||0)/c.netRevenue)*100:0;
+  const ctrs=(contractors||[]).filter(ct=>ct.active!==false);
   const netYield=gross>0?(c.netRevenue/gross)*100:0;
   const satchelCount=n(week.cogs.satchel_count);
-  const adSpend=n(week.opex?.meta_tiktok_ads||0);
+  const adSpend=n(week.opex?.google_ads||0)+n(week.opex?.meta_ads||0);
   const adROAS=adSpend>0?c.netRevenue/adSpend:0;
   const shipSubsidy=n(week.revenue.shipping_income)-c.totalFreight;
   const costPerOrder=satchelCount>0?c.totalFreight/satchelCount:0;
@@ -782,18 +826,24 @@ function generateWeeklyExport(week,fixed,opexKeys,depts,staff,labels){
   o+="  TOTAL COGS: "+fmt(c.totalCOGS)+" ("+cogsPct.toFixed(1)+"% of net rev) | Target: ≤"+targets.cogs_pct_target+"%\n\n";
   o+="GROSS PROFIT: "+fmt(c.grossProfit)+" | GROSS MARGIN: "+c.grossMargin.toFixed(1)+"% | Target: "+targets.gross_margin_target+"%\n\n";
   o+="OPEX Breakdown:\n";
-  o+="  Freight Total: "+fmt(c.totalFreight)+" | Net Shipping Subsidy: "+fmt(shipSubsidy)+(satchelCount>0?" | Cost/order shipped: "+fmt(costPerOrder):"")+"\n";
-  keys.filter(k=>k.group==="freight"&&!k.sub).forEach(k=>{const v=week.opex?.[k.key]!==""?n(week.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);if(v>0)o+="    "+k.label+": "+fmt(v)+"\n";});
-  o+="  Collabs Total: "+fmt(c.totalCollabs)+"\n";
-  keys.filter(k=>k.group==="collabs").forEach(k=>{const v=week.opex?.[k.key]!==""?n(week.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);if(v>0)o+="    "+k.label+": "+fmt(v)+"\n";});
-  o+="  Influencer Gifting (reclassified): "+fmt(dr.marketingDisc||0)+"\n";
-  o+="  General OPEX:\n";
-  keys.filter(k=>k.group==="general").forEach(k=>{const v=week.opex?.[k.key]!==""?n(week.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):(fixed?.monthlyFixedKeys?.includes(k.key)?n(fixed?.monthlyValues?.[k.key])/4:0));if(v>0)o+="    "+k.label+": "+fmt(v)+"\n";});
-  o+="  TOTAL OPEX: "+fmt(c.totalOPEX)+" ("+opexPct.toFixed(1)+"% of net rev) | Target: ≤"+targets.opex_pct_target+"%\n\n";
+  const vOf=k=>{const kd=keys.find(x=>x.key===k);const allowCarry=kd&&kd.group==="rent_fixed";return week.opex?.[k]!==""&&week.opex?.[k]!==undefined?n(week.opex[k]):(allowCarry&&fixed?.fixedKeys?.includes(k)?n(fixed?.values?.[k]):(allowCarry&&fixed?.monthlyFixedKeys?.includes(k)?n(fixed?.monthlyValues?.[k])/4:0));};
+  const listGroup=(group)=>{let s="";keys.filter(k=>k.group===group&&!k.sub).forEach(k=>{const v=vOf(k.key);if(v>0)s+="    "+k.label+": "+fmt(v)+"\n";});return s;};
+  o+="  Freight (Customer Shipping): "+fmt(c.totalFreight)+"\n"+listGroup("freight");
+  o+="  Gifting COGS + Shipping (real cash cost): "+fmt(c.totalGifting)+"\n"+listGroup("gifting");
+  o+="    (context only — NOT a cash cost, not in OPEX/net profit) Gifting retail value given away: "+fmt(dr.marketingDisc||0)+" | "+(dr.marketingOrders||0)+" orders\n";
+  o+="  Commissions: "+fmt(c.totalCommissions)+"\n"+listGroup("commissions");
+  o+="  Retainer Fees: "+fmt(c.totalRetainer)+"\n"+listGroup("retainer");
+  o+="  Rent + Utilities + Other Fixed Costs: "+fmt(c.totalRentFixed)+"\n"+listGroup("rent_fixed");
+  o+="  Software + Subscriptions: "+fmt(c.totalSoftware)+"\n"+listGroup("software");
+  o+="  Marketing (Ad Spend + Dept Costs): "+fmt(c.totalMarketing)+" (Google+Meta ad spend: "+fmt(c.totalMarketingAdSpend)+")\n"+listGroup("marketing");
+  o+="  TOTAL OPEX (excl. wages): "+fmt(c.totalOpexExclWages)+" ("+operatingCostsPct.toFixed(1)+"% of net rev) | Target: ≤"+(targets.operating_costs_pct_target||targets.opex_pct_target)+"%\n\n";
   o+="WAGES Breakdown:\n";
   wDepts.forEach(dept=>{dept.subs.forEach(sub=>{const v=n(week.wages?.[sub.key]||0);if(v>0)o+="  "+sub.label+" ("+dept.label+"): "+fmt(v)+"\n";});});
   o+="  Staff Discounts (reclassified): "+fmt(dr.staffDisc||0)+"\n";
-  o+="  TOTAL WAGES: "+fmt(c.totalWages)+" ("+wagesPct.toFixed(1)+"% of net rev) | Target: ≤"+targets.wages_pct_target+"%\n\n";
+  o+="  Independent Contractors: "+fmt(c.totalContractorWages)+"\n";
+  ctrs.forEach(ct=>{const wc=week.contractors?.[ct.id]||{};if(wc.activeThisWeek===false)return;let cost=0;if(ct.billingType==="fixed"){cost=n(wc.rateOverride||ct.fixedWeeklyRate||0);}else{const h=wc.taskHours||{};const csHrs=n(h.customerService??ct.defaultTaskHours?.customerService??0),mktHrs=n(h.marketing??ct.defaultTaskHours?.marketing??0),vaHrs=n(h.virtualAssistance??ct.defaultTaskHours?.virtualAssistance??0);cost=(csHrs+mktHrs+vaHrs)*n(ct.hourlyRate||0);}if(cost>0)o+="    "+ct.name+": "+fmt(cost)+"\n";});
+  o+="  TOTAL WAGES (staff + super + contractors): "+fmt(c.totalWages)+" ("+wagesPct.toFixed(1)+"% of net rev) | Target: ≤"+targets.wages_pct_target+"%\n";
+  o+="  Reclassified to Expenses (Service Recovery COGS + Gifting COGS/Shipping): "+fmt(c.reclassifiedToExpenses)+"\n\n";
   o+="TOTAL EXPENSES: "+fmt(c.totalExpenses)+(satchelCount>0?" | Total cost/order: "+fmt(c.totalExpenses/satchelCount):"")+"\n";
   o+="NET PROFIT: "+fmt(c.netProfit)+" | NET MARGIN: "+c.netMargin.toFixed(1)+"% | Target: "+targets.net_margin_target+"%\n\n";
   o+="--- OPERATIONAL CONTEXT ---\n";
@@ -889,12 +939,12 @@ function generateWeeklyExport(week,fixed,opexKeys,depts,staff,labels){
   return o;
 }
 
-function generateMonthlyExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,labels,factors){
+function generateMonthlyExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,labels,factors,contractors){
   const fmt=v=>"$"+Math.abs(v).toLocaleString("en-AU",{minimumFractionDigits:2,maximumFractionDigits:2});
   const pct=(v,b)=>b>0?((v/b)*100).toFixed(1)+"%":"0.0%";
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
-  const mc=calcMonth(weeks,fixed,extras,keys,wDepts);
+  const mc=calcMonth(weeks,fixed,extras,keys,wDepts,contractors);
   const wFactors=factors||weeks.map(()=>1);
   const pRate=(wc,i)=>{const f=wFactors[i];return{netRevenue:wc.netRevenue*f,totalCOGS:wc.totalCOGS*f,grossProfit:wc.grossProfit*f,grossMargin:wc.grossMargin,netMargin:wc.netMargin,totalFreight:wc.totalFreight*f,totalCollabs:wc.totalCollabs*f,totalWages:wc.totalWages*f,totalOPEX:wc.totalOPEX*f,totalExpenses:wc.totalExpenses*f,netProfit:wc.netProfit*f,gross:wc.gross*f,truePromoDisc:(wc.truePromoDisc||0)*f,satchel:(wc.satchel||0)*f,discReclass:{serviceRecoveryCOGS:(wc.discReclass?.serviceRecoveryCOGS||0)*f,serviceRecoveryOrders:Math.round((wc.discReclass?.serviceRecoveryOrders||0)*f),marketingDisc:(wc.discReclass?.marketingDisc||0)*f,staffDisc:(wc.discReclass?.staffDisc||0)*f,promoDisc:(wc.discReclass?.promoDisc||0)*f}};};
   const rCalcsE=mc.weekCalcs.map((wc,i)=>pRate(wc,i));
@@ -922,18 +972,18 @@ function generateMonthlyExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,la
   o+="True promotional discounts: "+fmt(totalDR.promoDisc)+" ("+pct(totalDR.promoDisc,gSales)+" of gross — this is the ONLY bucket affecting Net Revenue)\n\n";
   weeks.forEach((w,i)=>{
     if(wFactors[i]===0)return;const f=wFactors[i];const c=rCalcsE[i];const wTargets=w.weekTargets||DEFAULT_TARGETS;
-    const satchelCount=n(w.cogs?.satchel_count)||0;const adSpend=n(w.opex?.meta_tiktok_ads||0);
+    const satchelCount=n(w.cogs?.satchel_count)||0;const adSpend=n(w.opex?.google_ads||0)+n(w.opex?.meta_ads||0);
     const wGross=n(w.revenue?.gross_sales)*f;const wTier=wGross<24000?"A":wGross>=30000?"C":"B";
     o+="--- "+w.label+(f<1?" ("+Math.round(f*7)+"d pro-rated)":"")+" | "+w.dateRange+" ---\n";
     o+="  Gross: "+fmt(n(w.revenue.gross_sales))+" | Tier: "+wTier+" | True Promo Disc: -"+fmt(c.truePromoDisc)+" | Refunds: -"+fmt(n(w.revenue.refunds))+" | ShipIncome: +"+fmt(n(w.revenue.shipping_income))+" | PayPal: -"+fmt(n(w.revenue.paypal_fees))+" => NET: "+fmt(c.netRevenue)+"\n";
     o+="  COGS: MfgProduct "+fmt(n(w.cogs.manufacturing_product))+" | Inbound "+fmt(n(w.cogs.manufacturing_shipping))+" | Satchels "+n(w.cogs.satchel_count)+"@$"+(w.cogs.satchel_cost_each||fixed?.satchelCostDefault||"0.85")+"="+fmt(c.satchel)+" | ServiceRecovery "+fmt(c.discReclass.serviceRecoveryCOGS)+" => TOTAL: "+fmt(c.totalCOGS)+" | GP: "+fmt(c.grossProfit)+" ("+c.grossMargin.toFixed(1)+"%)\n";
     const fLines=keys.filter(k=>k.group==="freight").map(k=>{const v=w.opex?.[k.key]!==""?n(w.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);return k.label+": "+fmt(v);});
     o+="  Freight: "+fLines.join(" | ")+" => "+fmt(c.totalFreight)+"\n";
-    const cLines=keys.filter(k=>k.group==="collabs").map(k=>{const v=w.opex?.[k.key]!==""?n(w.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);return k.label+": "+fmt(v);});
+    const cLines=keys.filter(k=>["gifting","commissions","retainer"].includes(k.group)).map(k=>{const v=w.opex?.[k.key]!==""?n(w.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);return k.label+": "+fmt(v);});
     o+="  Collabs: "+cLines.join(" | ")+" | InfluencerGifting: "+fmt(c.discReclass.marketingDisc)+" => "+fmt(c.totalCollabs)+(adSpend>0?" | Ads: "+fmt(adSpend)+" (ROAS: "+(c.netRevenue>0?(c.netRevenue/adSpend).toFixed(2):0)+"x, Tier "+wTier+" cap: $"+(wTier==="A"?"6,570":wTier==="C"?"11,169":"9,330")+")":"")+"\n";
     const wLines=wDepts.flatMap(d=>d.subs.map(s=>s.label+": "+fmt(n(w.wages?.[s.key]||0))));
     o+="  Wages: "+wLines.join(" | ")+" | StaffBenefits: "+fmt(c.discReclass.staffDisc)+" => "+fmt(c.totalWages)+"\n";
-    const gLines=keys.filter(k=>k.group==="general").map(k=>{const v=w.opex?.[k.key]!==""?n(w.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);return v>0?k.label+": "+fmt(v):null;}).filter(Boolean);
+    const gLines=keys.filter(k=>["rent_fixed","software","marketing"].includes(k.group)).map(k=>{const v=w.opex?.[k.key]!==""?n(w.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);return v>0?k.label+": "+fmt(v):null;}).filter(Boolean);
     o+="  OPEX: "+(gLines.join(" | ")||"none")+" => "+fmt(c.totalOPEX)+"\n";
     o+="  NET PROFIT: "+fmt(c.netProfit)+" ("+c.netMargin.toFixed(1)+"%)"+(w.notes?" | Notes: "+w.notes:"")+"\n";
     const wAlerts=generateAlerts(w,c.netRevenue,c.discReclass||{},n(w.revenue.gross_sales),wTargets);
@@ -1588,8 +1638,8 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
   const c=calcWeek(week,fixed,keys,wDepts,ctrs);
   const satchelCost=week.cogs.satchel_cost_each||fixed?.satchelCostDefault||"0.85";
   const freightKeys=keys.filter(k=>k.group==="freight");
-  const collabKeys=keys.filter(k=>k.group==="collabs");
-  const generalKeys=keys.filter(k=>k.group==="general");
+  const collabKeys=keys.filter(k=>["gifting","commissions","retainer"].includes(k.group));
+  const generalKeys=keys.filter(k=>["rent_fixed","software","marketing"].includes(k.group));
 
   const renameOpex=(key,nl)=>{if(onSettingsChange){const nk=(settings?.opexKeys||keys).map(k=>k.key===key?{...k,label:nl}:k);onSettingsChange({...settings,opexKeys:nk});}};
   const renameDept=(dk,nl)=>{if(onSettingsChange){const nd=(settings?.wageDepts||wDepts).map(d=>d.key===dk?{...d,label:nl}:d);onSettingsChange({...settings,wageDepts:nd});}};
@@ -1636,7 +1686,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
         <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
           <span style={{fontFamily:ff,fontSize:11,color:MU}}>Total discounts (entered above): {fmtD(-n(week.revenue.discounts))}</span>
           <span style={{fontFamily:ff,fontSize:11,color:A}}>True promo discount only: {fmtD(-c.truePromoDisc)}</span>
-          <span style={{fontFamily:ff,fontSize:11,color:MU}}>Reclassified to expenses: {fmtD(-(n(week.revenue.discounts)-c.truePromoDisc))}</span>
+          <span style={{fontFamily:ff,fontSize:11,color:MU}}>Reclassified to expenses (Service Recovery COGS + Gifting COGS/Shipping): {fmtD(-c.reclassifiedToExpenses)}</span>
         </div>
       </div>
       <Row><Badge small label={<E value={labels.field_net_revenue} onSave={v=>labels._save("field_net_revenue",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>} value={c.netRevenue} color={A}/></Row>
@@ -1891,13 +1941,14 @@ function TargetsPanel({calc,week,labels}){
   const cogsPct=c.netRevenue>0?(c.totalCOGS/c.netRevenue)*100:0;
   const opexPct=c.netRevenue>0?(c.totalOPEX/c.netRevenue)*100:0;
   const wagesPct=c.netRevenue>0?(c.totalWages/c.netRevenue)*100:0;
+  const operatingCostsPct=c.netRevenue>0?((c.totalOpexExclWages||0)/c.netRevenue)*100:0;
   const promoRate=gross>0?(promoDisc/gross)*100:0;
 
   const metrics=[
     {label:"Gross Margin",actual:c.grossMargin,target:targets.gross_margin_target,unit:"%",higherBetter:true},
     {label:"Net Margin",actual:c.netMargin,target:targets.net_margin_target,unit:"%",higherBetter:true},
     {label:"COGS %",actual:cogsPct,target:targets.cogs_pct_target,unit:"%",higherBetter:false},
-    {label:"OPEX %",actual:opexPct,target:targets.opex_pct_target,unit:"%",higherBetter:false},
+    {label:"Operating Costs %",actual:operatingCostsPct,target:targets.operating_costs_pct_target||targets.opex_pct_target,unit:"%",higherBetter:false},
     {label:"Wages %",actual:wagesPct,target:targets.wages_pct_target,unit:"%",higherBetter:false},
     {label:"Promo Rate",actual:promoRate,target:targets.promo_disc_rate_max,unit:"%",higherBetter:false},
   ].filter(m=>m.actual>0||m.target>0);
@@ -2259,8 +2310,8 @@ function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,label
         <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:16,lineHeight:1.6}}>{subtitle}</div>
       </div>
       {renderGroup(displayKeys.filter(k=>k.group==="freight"),"sec_freight",part)}
-      {renderGroup(displayKeys.filter(k=>k.group==="collabs"),"sec_collabs",part)}
-      {renderGroup(displayKeys.filter(k=>k.group==="general"),"sec_general",part)}
+      {renderGroup(displayKeys.filter(k=>["gifting","commissions","retainer"].includes(k.group)),"sec_collabs",part)}
+      {renderGroup(displayKeys.filter(k=>["rent_fixed","software","marketing"].includes(k.group)),"sec_general",part)}
     </div>
   );
 
@@ -2568,11 +2619,11 @@ function SettingsPage({settings,onSettingsChange,theme,onThemeChange,labels,onLa
 }
 
 // ─── Monthly Overview ─────────────────────────────────────────────────────────
-function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opexKeys,depts,labels,monthKey,allMonthData}){
+function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opexKeys,depts,labels,monthKey,allMonthData,contractors}){
   const {S,S2,BR,A,MU,TX,ff,RD,GR,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
   const wDepts=depts||DEFAULT_WAGE_DEPTS;
-  const mc=calcMonth(weeks,fixed,extras,keys,wDepts);
+  const mc=calcMonth(weeks,fixed,extras,keys,wDepts,contractors);
   const monthDateRange=weeks.length>0?weeks[0].dateRange.split(" - ")[0]+" — "+weeks[weeks.length-1].dateRange.split(" - ")[1]:"";
   const [part2,setPart2]=useState(false);
   const [sumCopied,setSumCopied]=useState(false);
@@ -2641,7 +2692,7 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
 
   // When range spans multiple months, recalculate from activeWeeks
   const activeMc=useRange&&rangeFrom&&rangeTo
-    ?calcMonth(activeWeeks,fixed,extras,keys,wDepts)
+    ?calcMonth(activeWeeks,fixed,extras,keys,wDepts,contractors)
     :mc;
   const rCalcs=activeMc.weekCalcs.map((wc,i)=>proRatedCalc(wc,factors[i]));
   const rSum=f=>rCalcs.reduce((s,c)=>s+(c[f]||0),0);
@@ -2858,19 +2909,19 @@ function VisualisePage({weeks,fixed,allMonthData,opexKeys,depts}){
 
   let points=[];
   if(view==="weekly"){
-    const calcs=weeks.map(w=>calcWeek(w,fixed,keys,wDepts));
+    const calcs=weeks.map(w=>calcWeek(w,fixed,keys,wDepts,contractors));
     points=calcs.map((c,i)=>({label:weeks[i]?.label||("W"+(i+1)),value:getVal(c,weeks[i],sel)}));
   } else {
     const sk=Object.keys(allMonthData).sort();
     points=sk.map(k=>{
       const md=allMonthData[k]; const wks=md.weeks||[];
-      const mc=calcMonth(wks,fixed,md.extras,keys,wDepts);
+      const mc=calcMonth(wks,fixed,md.extras,keys,wDepts,contractors);
       if(sel.isDR){const val=mc.weekCalcs.reduce((s,c)=>s+(c.discReclass?.[sel.drKey]||0),0);return{label:(md.label||k).split(" ")[0],value:val};}
       if(sel.isWage){return{label:(md.label||k).split(" ")[0],value:wks.reduce((s,w)=>s+n(w.wages?.[sel.wageKey]||0),0)};}
       if(sel.isOpex){return{label:(md.label||k).split(" ")[0],value:wks.reduce((s,w)=>s+n(w.opex?.[sel.opexKey]||0),0)};}
       return{label:(md.label||k).split(" ")[0],value:mc[metric]||0};
     });
-    if(!points.length){const calcs=weeks.map(w=>calcWeek(w,fixed,keys,wDepts));points=calcs.map((c,i)=>({label:weeks[i]?.label||("W"+(i+1)),value:getVal(c,weeks[i],sel)}));}
+    if(!points.length){const calcs=weeks.map(w=>calcWeek(w,fixed,keys,wDepts,contractors));points=calcs.map((c,i)=>({label:weeks[i]?.label||("W"+(i+1)),value:getVal(c,weeks[i],sel)}));}
   }
 
   if(!points.length)return <div style={{color:MU,fontFamily:ff,padding:40,textAlign:"center"}}>No data yet.</div>;
@@ -2940,7 +2991,7 @@ function ComparePage({allMonthData,fixed,opexKeys,depts,labels}){
   const [dateB1,setDateB1]=useState(""); const [dateB2,setDateB2]=useState("");
   const [copied,setCopied]=useState(false);
 
-  const getMC=key=>{const md=allMonthData[key];if(!md)return null;return{label:md.label||key,mc:calcMonth(md.weeks||[],fixed,md.extras,keys,wDepts)};};
+  const getMC=key=>{const md=allMonthData[key];if(!md)return null;return{label:md.label||key,mc:calcMonth(md.weeks||[],fixed,md.extras,keys,wDepts,contractors)};};
 
   // Parse dd/mm/yy from week dateRange strings
   const parseWkDate2=s=>{if(!s)return null;const[d,m,y]=s.split("/");if(!d||!m||!y)return null;return new Date(2000+parseInt(y),parseInt(m)-1,parseInt(d));};
@@ -2976,7 +3027,7 @@ function ComparePage({allMonthData,fixed,opexKeys,depts,labels}){
     if(!matched.length)return{label,mc:null,empty:true};
     const factors=matched.map(w=>calcFactor2(w,from,to));
     // Pro-rate each week calc then sum
-    const wCalcs=matched.map(w=>calcWeek(w,fixed,keys,wDepts));
+    const wCalcs=matched.map(w=>calcWeek(w,fixed,keys,wDepts,contractors));
     const proRate=(wc,f)=>({
       netRevenue:wc.netRevenue*f, totalCOGS:wc.totalCOGS*f,
       totalOPEX:wc.totalOPEX*f, totalWages:wc.totalWages*f,
@@ -3002,7 +3053,7 @@ function ComparePage({allMonthData,fixed,opexKeys,depts,labels}){
   else if(mode==="weeks"){
     const mk=allKeys[wMonthIdx]; const md=allMonthData[mk];
     if(md?.weeks){
-      const wkCalc=idx=>{if(!md.weeks[idx])return null;const c=calcWeek(md.weeks[idx],fixed,keys,wDepts);return{label:md.weeks[idx].label+" ("+md.weeks[idx].dateRange+")",mc:{...c,weekCalcs:[c],extraOpex:0}};};
+      const wkCalc=idx=>{if(!md.weeks[idx])return null;const c=calcWeek(md.weeks[idx],fixed,keys,wDepts,contractors);return{label:md.weeks[idx].label+" ("+md.weeks[idx].dateRange+")",mc:{...c,weekCalcs:[c],extraOpex:0}};};
       periodA=wkCalc(wA); periodB=wkCalc(wB);
     }
   } else if(mode==="custom"){
@@ -3180,7 +3231,7 @@ function ReportsPage({monthData,fixed,onSave,onExport,opexKeys,depts,rosterSaves
         if(md.type==="margin_analysis") return null;
         const weeks=editing===key?editWeeks:(md.weeks||[]);
         const extras=editing===key?editExtras:(md.extras||emptyExtras(keys));
-        const mc=calcMonth(weeks,fixed,extras,keys,wDepts);
+        const mc=calcMonth(weeks,fixed,extras,keys,wDepts,contractors);
         const isOpen=expanded===key,isEdit=editing===key,mLabel=md.label||key;
         return(
           <div key={key} style={{border:"1px solid "+BR,borderRadius:radius+2,marginBottom:10,overflow:"visible"}}>
@@ -4340,12 +4391,18 @@ function App(){
 
   const handleWeeklyExport=useCallback(()=>{
     const week=curWeeks[activeWeek];if(!week)return;
-    navigator.clipboard.writeText(generateWeeklyExport(week,fixed,opexKeys,wageDepts,staff,labels));
+    const c=calcWeek(week,fixed,opexKeys,wageDepts,contractors);
+    const rec=reconcileWeek(c);
+    if(!rec.ok){alert("Export blocked — reconciliation check failed:\n\n"+rec.issues.map(i=>i.label+": expected "+i.expected.toFixed(2)+" but got "+i.actual.toFixed(2)+" (diff "+i.diff.toFixed(2)+")").join("\n"));return;}
+    navigator.clipboard.writeText(generateWeeklyExport(week,fixed,opexKeys,wageDepts,staff,labels,contractors));
     setCopied(true);setTimeout(()=>setCopied(false),3000);
-  },[curWeeks,activeWeek,fixed,opexKeys,wageDepts,staff,labels]);
+  },[curWeeks,activeWeek,fixed,opexKeys,wageDepts,staff,labels,contractors]);
 
   const handleExport=(weeksData=curWeeks,extras=curExtras,label=selMonth?.label,factors=null)=>{
-    navigator.clipboard.writeText(generateMonthlyExport(weeksData,fixed,extras,label,opexKeys,wageDepts,staff,labels,factors));
+    const mc=calcMonth(weeksData,fixed,extras,opexKeys,wageDepts,contractors);
+    const rec=reconcileWeek(mc);
+    if(!rec.ok){alert("Export blocked — reconciliation check failed:\n\n"+rec.issues.map(i=>i.label+": expected "+i.expected.toFixed(2)+" but got "+i.actual.toFixed(2)+" (diff "+i.diff.toFixed(2)+")").join("\n"));return;}
+    navigator.clipboard.writeText(generateMonthlyExport(weeksData,fixed,extras,label,opexKeys,wageDepts,staff,labels,factors,contractors));
     setCopied(true);setTimeout(()=>setCopied(false),3000);
   };
   const handleSaveMonthData=async md=>{setMonthData(md);await saveAll(md,fixed,settings);};
@@ -4504,7 +4561,7 @@ function App(){
 
           {tab==="overview"&&!loading&&(
             <div style={{background:S,border:"1px solid "+BR,borderRadius:radius+4,padding:"24px 28px"}}>
-              <MonthlyOverview weeks={curWeeks} fixed={fixed} extras={curExtras} onExtrasChange={updateExtras} onExport={(w,e,rl,f)=>handleExport(w,e,rl||selMonth?.label,f)} copied={copied} opexKeys={opexKeys} depts={wageDepts} labels={labels} monthKey={curKey} allMonthData={monthData}/>
+              <MonthlyOverview weeks={curWeeks} fixed={fixed} extras={curExtras} onExtrasChange={updateExtras} onExport={(w,e,rl,f)=>handleExport(w,e,rl||selMonth?.label,f)} copied={copied} opexKeys={opexKeys} depts={wageDepts} labels={labels} monthKey={curKey} allMonthData={monthData} contractors={contractors}/>
             </div>
           )}
 
