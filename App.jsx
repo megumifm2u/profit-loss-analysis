@@ -194,7 +194,7 @@ const DISCOUNT_CODE_REGISTRY = [
   { id:"RESHIP-DAMAGED", category:"service_recovery", useCase:"Garment damaged in transit, replacement sent", plCategory:"Logistics Loss / COGS", hasCOGS:true, hasShipping:true },
   { id:"RESHIP-RTS",     category:"service_recovery", useCase:"Return-to-sender reshipment — customer paid, you're resending", plCategory:"Logistics / Operational", hasCOGS:false, hasShipping:true },
   { id:"RESHIP-CUSTOMS", category:"service_recovery", useCase:"Parcel failed customs, being resent free of charge", plCategory:"Logistics Loss", hasCOGS:true, hasShipping:true },
-  { id:"EXCHANGE-SE",    category:"service_recovery", useCase:"Size exchange — customer paid, you're sending correct size", plCategory:"Customer Retention Cost / COGS", hasCOGS:true, hasShipping:true },
+  { id:"EXCHANGE-SE",    category:"service_recovery", useCase:"Size exchange — customer pays shipping, no COGS loss (straight swap)", plCategory:"Zero-Cost Exchange (tracked, not expensed)", hasCOGS:false, hasShipping:false },
   { id:"EXCHANGE-GIFT",  category:"service_recovery", useCase:"Exchange absorbed as goodwill gesture", plCategory:"CS Goodwill Expense", hasCOGS:true, hasShipping:true },
   { id:"CS-ERROR",       category:"service_recovery", useCase:"We packed wrong item — replacement sent at our cost", plCategory:"Operational Error / COGS", hasCOGS:true, hasShipping:true },
   { id:"FM2USTAFF",      category:"staff",            useCase:"Staff purchases", plCategory:"Staff Benefit / COGS", hasCOGS:false, hasShipping:false },
@@ -332,7 +332,13 @@ function codeDataToDiscBuckets(codeData){
   DISCOUNT_CODE_REGISTRY.forEach(c=>{
     const d=codeData?.[c.id]; if(!d||d.active===false)return;
     const t=tot[c.category]; if(!t)return;
-    t.rv+=n(d.retailValue); t.ord+=n(d.orders); t.cogs+=n(d.cogsValue)+n(d.shippingValue);
+    t.rv+=n(d.retailValue); t.ord+=n(d.orders);
+    // Cost only counts if this code is flagged as actually carrying a real COGS/shipping
+    // impact — a code marked hasCOGS:false / hasShipping:false (e.g. a size exchange the
+    // customer pays shipping on) never contributes cost, even via the retail-value estimate.
+    const cogsPart=n(d.cogsValue)||(c.hasCOGS?n(d.retailValue):0);
+    const shipPart=c.hasShipping?n(d.shippingValue):0;
+    t.cogs+=cogsPart+shipPart;
   });
   // promo slot
   const p=codeData?.["__promo__"]; if(p&&p.active!==false){ tot.promotional.rv+=n(p.retailValue); tot.promotional.ord+=n(p.orders); }
@@ -368,7 +374,7 @@ function calcDiscReclassification(discBuckets){
   const staff=discBuckets?.staff||{};
   const promo=discBuckets?.promotional||{};
   return {
-    serviceRecoveryCOGS: n(sr.cogsValue)||n(sr.retailValue), // prefer COGS value if entered
+    serviceRecoveryCOGS: n(sr.cogsValue), // per-code hasCOGS/hasShipping gating already applied in codeDataToDiscBuckets
     serviceRecoveryRetail: n(sr.retailValue),
     serviceRecoveryOrders: n(sr.orders),
     marketingDisc: n(mkt.retailValue),
