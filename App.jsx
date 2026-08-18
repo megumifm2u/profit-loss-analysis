@@ -985,7 +985,8 @@ function generateMonthlyExport(weeks,fixed,extras,mLabel,opexKeys,depts,staff,la
     o+="  Wages: "+wLines.join(" | ")+" | StaffBenefits: "+fmt(c.discReclass.staffDisc)+" => "+fmt(c.totalWages)+"\n";
     const gLines=keys.filter(k=>["rent_fixed","software","marketing"].includes(k.group)).map(k=>{const v=w.opex?.[k.key]!==""?n(w.opex[k.key]):(fixed?.fixedKeys?.includes(k.key)?n(fixed?.values?.[k.key]):0);return v>0?k.label+": "+fmt(v):null;}).filter(Boolean);
     o+="  OPEX: "+(gLines.join(" | ")||"none")+" => "+fmt(c.totalOPEX)+"\n";
-    o+="  NET PROFIT: "+fmt(c.netProfit)+" ("+c.netMargin.toFixed(1)+"%)"+(w.notes?" | Notes: "+w.notes:"")+"\n";
+    o+="  NET PROFIT: "+fmt(c.netProfit)+" ("+c.netMargin.toFixed(1)+"%)\n";
+    if(w.notes)o+="  Notes: "+w.notes+"\n";
     const wAlerts=generateAlerts(w,c.netRevenue,c.discReclass||{},n(w.revenue.gross_sales),wTargets);
     if(wAlerts.length){o+="  ACTIONS REQUIRED:\n";wAlerts.forEach(a=>{o+="  "+a.title+": "+a.action+"\n";});}
     o+="\n";
@@ -1893,6 +1894,25 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
         </Row>
         {/* Targets vs actuals inline */}
         <TargetsPanel calc={c} week={week} labels={labels}/>
+        <div style={{marginTop:16}}>
+          <div style={{fontFamily:ff,fontSize:10,letterSpacing:2,color:A,textTransform:"uppercase",marginBottom:10}}>OPEX & Marketing Breakdown</div>
+          <Row>
+            <Badge small label="Freight" value={-c.totalFreight} color={RD}/>
+            <Badge small label="Gifting COGS" value={-c.giftingCOGS} color={RD}/>
+            <Badge small label="Gifting Shipping" value={-c.giftingShipping} color={RD}/>
+            <Badge small label="Commissions" value={-c.totalCommissions} color={RD}/>
+          </Row>
+          <Row>
+            <Badge small label="Retainer Fees" value={-c.totalRetainer} color={RD}/>
+            <Badge small label="Rent + Utilities + Fixed" value={-c.totalRentFixed} color={RD}/>
+            <Badge small label="Software + Subscriptions" value={-c.totalSoftware} color={RD}/>
+            <Badge small label={"Marketing (Ads: "+fmtD(c.totalMarketingAdSpend)+")"} value={-c.totalMarketing} color={RD}/>
+          </Row>
+          <Row>
+            <Badge small label="Total OPEX (excl. Wages)" value={-c.totalOpexExclWages} color={RD}/>
+            <Badge small label="Reclassified to Expenses" value={-c.reclassifiedToExpenses} color={YL}/>
+          </Row>
+        </div>
       </div>
       <SH><E value={labels.sec_notes} onSave={v=>labels._save("sec_notes",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
       <textarea value={week.notes} onChange={e=>onChange({...week,notes:sanitize.text(e.target.value)})} placeholder="Unusual costs, one-offs, events..." rows={3}
