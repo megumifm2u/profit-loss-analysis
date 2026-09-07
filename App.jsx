@@ -4291,7 +4291,7 @@ function App(){
   // new structural properties survive even if settings were saved before they existed
   const opexKeys=(settings?.opexKeys||DEFAULT_OPEX_KEYS).map(k=>{
     const def=DEFAULT_OPEX_KEYS.find(d=>d.key===k.key)||{};
-    return {...def,...k}; // def first so stored label/group overrides default, but def adds computed/sub/parent
+    return {...def,...k,group:def.group??k.group,computed:def.computed,sub:def.sub,parent:def.parent}; // structural fields (group/computed/sub/parent) always come from the current default so reclassifications can't be silently frozen by stale saved data; label/value stay user-editable
   });
   // Also ensure sub-keys from DEFAULT are present (user may have saved before sub-keys were added)
   const storedKeys=opexKeys.map(k=>k.key);
