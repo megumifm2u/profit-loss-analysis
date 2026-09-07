@@ -145,8 +145,7 @@ const DEFAULT_LABELS = {
   sec_opex:"OPEX - Operating Expenses",
   sec_opex_sub:"All operating costs including freight, collabs, and wages. Tinted fields are pre-filled from Fixed Costs.",
   sec_freight:"Customer Shipping and Freight", sec_freight_sub:"Freight costs - included in total OPEX above.",
-  sec_collabs:"Collaborations and Influencers", sec_collabs_sub:"Full cost breakdown per collaboration.",
-  sec_wages:"Staff Wages - By Department", sec_wages_sub:"Wages by department - included in total OPEX above.",
+  sec_collabs:"Marketing", sec_collabs_sub:"Ad spend, marketing dept wages, gifting, commissions and retainer fees - grouped separately from general operating costs.",sec_wages:"Staff Wages - By Department", sec_wages_sub:"Wages by department - included in total OPEX above.",
   sec_general:"General Operating Costs", sec_notes:"Notes / Context", sec_summary:"Weekly P&L Summary",
   field_gross_sales:"Gross Sales", field_refunds:"Refunds / Returns",
   field_discounts:"Gross Discounts (all codes)", field_shipping_income:"Shipping Income",
@@ -1646,7 +1645,8 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
   const satchelCost=week.cogs.satchel_cost_each||fixed?.satchelCostDefault||"0.85";
   const freightKeys=keys.filter(k=>k.group==="freight");
   const collabKeys=keys.filter(k=>["gifting","commissions","retainer"].includes(k.group));
-  const generalKeys=keys.filter(k=>["rent_fixed","software","marketing"].includes(k.group));
+      const generalKeys=keys.filter(k=>["rent_fixed","software"].includes(k.group));
+      const marketingAdKeys=keys.filter(k=>k.group==="marketing");
 
   const renameOpex=(key,nl)=>{if(onSettingsChange){const nk=(settings?.opexKeys||keys).map(k=>k.key===key?{...k,label:nl}:k);onSettingsChange({...settings,opexKeys:nk});}};
   const renameDept=(dk,nl)=>{if(onSettingsChange){const nd=(settings?.wageDepts||wDepts).map(d=>d.key===dk?{...d,label:nl}:d);onSettingsChange({...settings,wageDepts:nd});}};
@@ -1773,9 +1773,15 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
 
         <SH sub><E value={labels.sec_collabs} onSave={v=>labels._save("sec_collabs",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
         <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_collabs_sub} onSave={v=>labels._save("sec_collabs_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
+        <Grid>{marketingAdKeys.map(({key,label})=>opexField(key,label))}</Grid>
         <Grid>{collabKeys.map(({key,label})=>opexField(key,label))}</Grid>
-        <Row><Badge small label="Influencer / Marketing Gifting (reclassified)" value={-(c.discReclass?.marketingDisc||0)} color={RD}/></Row>
-        <Row><Badge small label="Total Collabs" value={-c.totalCollabs} color={RD}/></Row>
+        <Row><Badge small label="Marketing Dept Wages (see Staff Wages below)" value={-n(week.wages?.marketing_dept||0)} color={RD}/></Row>
+        <Row><Badge small label="Total Ad Spend (Google + Meta)" value={-c.totalMarketingAdSpend} color={RD}/></Row>
+        <Row><Badge small label="Total Gifting (COGS + Shipping)" value={-c.totalGifting} color={RD}/></Row>
+        <Row><Badge small label="Total Commissions" value={-c.totalCommissions} color={RD}/></Row>
+        <Row><Badge small label="Total Retainer Fees" value={-c.totalRetainer} color={RD}/></Row>
+        <Row><Badge small label="Influencer / Marketing Gifting (reclassified, informational only)" value={-(c.discReclass?.marketingDisc||0)} color={RD}/></Row>
+        <Row><Badge small label="Total Marketing" value={-(c.totalMarketing+c.totalCollabs)} color={RD}/></Row>
 
         <SH sub><E value={labels.sec_wages} onSave={v=>labels._save("sec_wages",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
         <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_wages_sub} onSave={v=>labels._save("sec_wages_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
@@ -1883,8 +1889,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
           </div>
         )}
 
-        <SH sub><E value={labels.sec_general} onSave={v=>labels._save("sec_general",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
-        <Grid>{generalKeys.map(({key,label})=>opexField(key,label))}</Grid>
+<Accordion title={labels.sec_general} defaultOpen={false}><Grid>{generalKeys.map(({key,label})=>opexField(key,label))}</Grid></Accordion>
         <Row><Badge small label="Total OPEX" value={-c.totalOPEX} color={RD}/></Row>
       </div>
 
