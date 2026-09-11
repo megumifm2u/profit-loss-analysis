@@ -399,7 +399,12 @@ function calcWeek(week,fixed,opexKeys,depts,contractors){
   const promoDisc = dr.promoDisc || (totalDiscounts - dr.serviceRecoveryRetail - dr.marketingDisc - dr.staffDisc);
   const truePromoDisc = Math.max(0, promoDisc);
 
-  const netRevenue = gross - refunds - truePromoDisc + shipInc - ppFees;
+  // Gifted product is not revenue. Its retail value is excluded from truePromoDisc above (so it is
+  // not treated as a promotional discount), but it must still come out of revenue - Shopify reports
+  // the gifted order inside gross_sales with a matching 100% discount. Leaving it in inflated net
+  // revenue, and therefore net profit, by the full retail value of everything gifted.
+  // The real cash cost of gifting stays where it was: Gifting COGS + Gifting Shipping under Marketing.
+  const netRevenue = gross - refunds - truePromoDisc - dr.marketingDisc + shipInc - ppFees;
 
   const mfgP=n(week.cogs.manufacturing_product), mfgS=n(week.cogs.manufacturing_shipping);
   const satchelCost=week.cogs.satchel_cost_each||fixed?.satchelCostDefault||"0.85";
@@ -828,7 +833,7 @@ function generateWeeklyExport(week,fixed,opexKeys,depts,staff,labels,contractors
   o+="Refunds: -"+fmt(n(week.revenue.refunds))+" ("+refundRate.toFixed(1)+"% of gross)\n";
   o+="Total Discounts (all codes): -"+fmt(n(week.revenue.discounts))+"\n";
   o+="  → Service Recovery (reclassified to COGS): "+fmt(srCost)+" | "+srOrders+" orders\n";
-  o+="  → Marketing / Influencer gifting (reclassified to OPEX): "+fmt(dr.marketingDisc||0)+"\n";
+  o+="  → Marketing / Influencer gifting (deducted from revenue; cash cost in Gifting COGS + Shipping): "+fmt(dr.marketingDisc||0)+"\n";
   o+="  → Staff discounts (reclassified to wages): "+fmt(dr.staffDisc||0)+"\n";
   o+="  → True promotional (stays as revenue deduction): "+fmt(c.truePromoDisc)+" ("+promoRate.toFixed(1)+"% of gross)\n";
   o+="Shipping Income: +"+fmt(n(week.revenue.shipping_income))+"\n";
@@ -847,7 +852,7 @@ function generateWeeklyExport(week,fixed,opexKeys,depts,staff,labels,contractors
   const listGroup=(group)=>{let s="";keys.filter(k=>k.group===group&&!k.sub).forEach(k=>{const v=vOf(k.key);if(v>0)s+="    "+k.label+": "+fmt(v)+"\n";});return s;};
   o+="  Freight (Customer Shipping): "+fmt(c.totalFreight)+"\n"+listGroup("freight");
   o+="  Gifting COGS + Shipping (real cash cost): "+fmt(c.totalGifting)+"\n"+listGroup("gifting");
-  o+="    (context only — NOT a cash cost, not in OPEX/net profit) Gifting retail value given away: "+fmt(dr.marketingDisc||0)+" | "+(dr.marketingOrders||0)+" orders\n";
+  o+="    (deducted from revenue; cash cost sits in Gifting COGS + Shipping) Gifting retail value given away: "+fmt(dr.marketingDisc||0)+" | "+(dr.marketingOrders||0)+" orders\n";
   o+="  Commissions: "+fmt(c.totalCommissions)+"\n"+listGroup("commissions");
   o+="  Retainer Fees: "+fmt(c.totalRetainer)+"\n"+listGroup("retainer");
   o+="  Rent + Utilities + Other Fixed Costs: "+fmt(c.totalRentFixed)+"\n"+listGroup("rent_fixed");
@@ -2051,7 +2056,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
 
         <Row>
           <Badge small label="Marketing Wages (counted under OPEX, shown here for context)" value={-c.marketingWagesInfo} color={MU}/>
-          <Badge small label="Gifting Retail Given Away (context only, not a cost)" value={-(c.discReclass?.marketingDisc||0)} color={MU}/>
+          <Badge small label="Gifting Retail Given Away (deducted from revenue, not an expense)" value={-(c.discReclass?.marketingDisc||0)} color={MU}/>
         </Row>
         <Row><Badge small label="TOTAL MARKETING" value={-c.marketingSection} color={RD}/></Row>
       </div>
@@ -3137,7 +3142,7 @@ function MonthlyOverview({weeks,fixed,extras,onExtrasChange,onExport,copied,opex
             <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:12}}>
               {[
                 {label:"Service Recovery (→ COGS)",val:totalDR.serviceRecoveryCOGS,col:RD,sub:totalDR.serviceRecoveryOrders+" orders"},
-                {label:"Influencer / Marketing (→ OPEX)",val:totalDR.marketingDisc,col:"#ffd97d",sub:"reclassified as marketing expense"},
+                {label:"Influencer / Marketing (→ Revenue)",val:totalDR.marketingDisc,col:"#ffd97d",sub:"deducted from revenue; cash cost sits in Gifting COGS + Shipping"},
                 {label:"Staff Benefits (→ Wages)",val:totalDR.staffDisc,col:A,sub:"reclassified as staff benefit"},
                 {label:"True Promotional (→ Revenue Deduction)",val:totalDR.promoDisc,col:GR,sub:"this is the only bucket reducing Net Revenue"},
               ].map(({label,val,col,sub})=>(
