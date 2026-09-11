@@ -1294,12 +1294,28 @@ function ShopifyImport({week,onChange,labels,settings}){
     const oCount=Object.keys(parsed.opex).length;
     const total=rCount+cCount+oCount;
     if(!total){setMsg("No values detected — check format");setDetail([]);return;}
+    // AusPost is a computed parent: calcWeek ignores opex.auspost the moment either
+    // sub-key holds a value. Merging an import on top of an already-filled week could
+    // therefore write a new AusPost total that was silently discarded in favour of last
+    // week's domestic/international split, understating freight and Total Expenses with
+    // no warning. Whichever side the paste supplies now wins outright.
+    const nextOpex={...week.opex,...parsed.opex};
+    const gotParent=parsed.opex.auspost!==undefined;
+    const gotSubs=parsed.opex.auspost_domestic!==undefined||parsed.opex.auspost_intl!==undefined;
+    if(gotSubs){
+      nextOpex.auspost="";
+      if(parsed.opex.auspost_domestic===undefined)nextOpex.auspost_domestic="";
+      if(parsed.opex.auspost_intl===undefined)nextOpex.auspost_intl="";
+    }else if(gotParent){
+      nextOpex.auspost_domestic="";
+      nextOpex.auspost_intl="";
+    }
     onChange({
       ...week,
       shopifyRaw:raw,
       revenue:{...week.revenue,...parsed.revenue},
       cogs:{...week.cogs,...parsed.cogs},
-      opex:{...week.opex,...parsed.opex},
+      opex:nextOpex,
     });
     const ps=[];
     if(rCount)ps.push(rCount+" revenue");
