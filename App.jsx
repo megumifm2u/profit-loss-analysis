@@ -1646,6 +1646,69 @@ function ClearAll({onClear}){
 }
 
 // ─── Week Form ────────────────────────────────────────────────────────────────
+// ─── Models (weekly shoot bookings) ───────────────────────────────────────────
+// Replaces the single Model Wages figure with one row per booked model.
+// The rows stay the entry surface; their total is written straight back into the
+// existing model_wages OPEX key, so every subtotal, section total, export and
+// Shopify import path keeps working untouched and nothing is counted twice.
+const MODEL_MAX=10;
+const newModelRow=()=>({id:"model_"+Date.now()+"_"+Math.random().toString(36).slice(2,7),name:"",amount:"",active:true});
+function getModelRows(week){
+  if(Array.isArray(week.models)&&week.models.length)return week.models;
+  const legacy=n(week.opex?.model_wages||0);
+  if(legacy>0)return [{id:"model_legacy",name:"Model booking",amount:String(legacy),active:true}];
+  return [{id:"model_first",name:"",amount:"",active:true}];
+}
+const modelsTotal=rows=>(rows||[]).reduce((s,r)=>s+(r.active===false?0:n(r.amount)),0);
+
+function ModelsPanel({week,onChange}){
+  const {S,S2,BR,A,MU,RD,GR,TX,ff,radius}=useTheme();
+  const bi=useBI();
+  const rows=getModelRows(week);
+  const commit=next=>onChange({...week,models:next,opex:{...week.opex,model_wages:String(modelsTotal(next))}});
+  const upRow=(id,field,val)=>commit(rows.map(r=>r.id===id?{...r,[field]:val}:r));
+  const addRow=()=>{ if(rows.length>=MODEL_MAX)return; commit([...rows,newModelRow()]); };
+  const rmRow=id=>{ const next=rows.filter(r=>r.id!==id); commit(next.length?next:[newModelRow()]); };
+  const total=modelsTotal(rows);
+  const activeCount=rows.filter(r=>r.active!==false&&(r.name.trim()||n(r.amount)>0)).length;
+  const btn={padding:"7px 12px",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:11,cursor:"pointer",letterSpacing:1.2,textTransform:"uppercase",borderRadius:radius};
+
+  return(
+    <div>
+      <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10,lineHeight:1.6}}>
+        One row per model booked this week. Leave a model inactive between shoots; inactive rows are kept for next time and count as zero.
+      </div>
+      {rows.map((r,i)=>{
+        const off=r.active===false;
+        return(
+          <div key={r.id} style={{display:"flex",gap:8,alignItems:"center",marginBottom:8,opacity:off?0.45:1}}>
+            <button onClick={()=>upRow(r.id,"active",off)} title={off?"Set active":"Set inactive"}
+              style={{flexShrink:0,width:66,padding:"7px 0",background:"transparent",border:"1px solid "+(off?BR:GR),color:off?MU:GR,fontFamily:ff,fontSize:10,cursor:"pointer",letterSpacing:1,textTransform:"uppercase",borderRadius:radius}}>
+              {off?"Off":"On"}
+            </button>
+            <input value={r.name} onChange={e=>upRow(r.id,"name",sanitize.text(e.target.value))} placeholder={"Model "+(i+1)+" name"}
+              style={{...bi,flex:1,minWidth:120,padding:"7px 9px",fontSize:13}}/>
+            <div style={{width:150,flexShrink:0}}>
+              <CI value={r.amount} onChange={v=>upRow(r.id,"amount",sanitize.money(v))} placeholder="Invoice"/>
+            </div>
+            <button onClick={()=>rmRow(r.id)} title="Remove this model"
+              style={{flexShrink:0,background:"transparent",border:"none",color:MU,cursor:"pointer",fontFamily:ff,fontSize:15,padding:"0 6px"}}>x</button>
+          </div>
+        );
+      })}
+      <div style={{display:"flex",gap:10,alignItems:"center",marginTop:10,flexWrap:"wrap"}}>
+        <button onClick={addRow} disabled={rows.length>=MODEL_MAX} style={{...btn,opacity:rows.length>=MODEL_MAX?0.4:1,cursor:rows.length>=MODEL_MAX?"default":"pointer"}}>
+          + Add model
+        </button>
+        <span style={{fontFamily:ff,fontSize:10,color:MU}}>
+          {rows.length} of {MODEL_MAX} rows{activeCount?" · "+activeCount+" booked this week":""}
+        </span>
+      </div>
+      <Row><Badge small label="Total Model Invoices" value={-total} color={RD}/></Row>
+    </div>
+  );
+}
+
 // ─── Affiliate Performance (UpPromote import) ─────────────────────────────────
 const AFF_SHEET_CDN="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
 let _affSheetPromise=null;
@@ -1729,15 +1792,20 @@ function affParseCSV(text){
   return rows;
 }
 
-// Re-importing keeps any gifting or retainer cost already typed against that person
+// Re-importing keeps any gifting or retainer cost already typed against that person,
+// and never discards manually added rows (they are not in the export file by definition).
 function affMerge(existing,incoming){
   const keyOf=a=>((a.email||"").toLowerCase())||affNorm(a.name);
+  const prev=existing||[];
   const byKey={};
-  (existing||[]).forEach(a=>{byKey[keyOf(a)]=a;});
-  return incoming.map(a=>{
+  prev.forEach(a=>{const k=keyOf(a); if(k&&!byKey[k])byKey[k]=a;});
+  const merged=incoming.map(a=>{
     const p=byKey[keyOf(a)];
     return p?{...a,id:p.id,gift:p.gift||"",retainer:p.retainer||""}:a;
   });
+  const incomingKeys=new Set(incoming.map(keyOf).filter(Boolean));
+  const keptManual=prev.filter(a=>a.manual&&!incomingKeys.has(keyOf(a)));
+  return [...merged,...keptManual];
 }
 
 // Contribution uses gross margin, not raw sales - $500 of sales at 55% margin is $275 of value
@@ -1765,7 +1833,9 @@ function AffiliatePanel({week,onChange,defaultMargin}){
   const setList=v=>onChange({...week,affiliates:v});
   const upA=(id,field,val)=>setList(list.map(a=>a.id===id?{...a,[field]:val}:a));
   const rmA=id=>setList(list.filter(a=>a.id!==id));
-  const addRow=()=>setList([...list,{id:"aff_"+Date.now()+"_"+Math.random().toString(36).slice(2,7),name:"",email:"",clicks:"",orders:"",sales:"",comm:"",gift:"",retainer:""}]);
+  // manual:true keeps the row visible even with no sales and no cost, and protects it
+  // from being wiped by the next import.
+  const addRow=()=>setList([...list,{id:"aff_"+Date.now()+"_"+Math.random().toString(36).slice(2,7),name:"",email:"",clicks:"",orders:"",sales:"",comm:"",gift:"",retainer:"",manual:true}]);
 
   const handleFile=async e=>{
     const f=e.target.files&&e.target.files[0];
@@ -1788,9 +1858,12 @@ function AffiliatePanel({week,onChange,defaultMargin}){
     setBusy(false);
   };
 
-  const rows=useMemo(()=>list.map(a=>({a,m:calcAffiliate(a,marginPct)})).sort((x,y)=>y.m.sales-x.m.sales||y.m.cost-x.m.cost),[list,marginPct]);
-  const active=rows.filter(r=>r.m.sales>0||r.m.cost>0);
-  const dormant=rows.filter(r=>!(r.m.sales>0||r.m.cost>0));
+  const rows=useMemo(()=>list.map(a=>({a,m:calcAffiliate(a,marginPct)})).sort((x,y)=>(y.a.manual?1:0)-(x.a.manual?1:0)||y.m.sales-x.m.sales||y.m.cost-x.m.cost),[list,marginPct]);
+  // A row only hides when it came from an import and has nothing on it. Rows you added
+  // by hand always stay on screen, otherwise pressing Add looks like it did nothing.
+  const isShown=r=>r.a.manual||r.m.sales>0||r.m.cost>0;
+  const active=rows.filter(isShown);
+  const dormant=rows.filter(r=>!isShown(r));
   const shown=showAll?rows:active;
 
   const T=rows.reduce((s,r)=>({
@@ -1875,6 +1948,7 @@ function AffiliatePanel({week,onChange,defaultMargin}){
                         style={{...bi,padding:"5px 7px",fontSize:12,background:"transparent",border:"1px solid transparent"}}
                         onFocus={e=>e.target.style.border="1px solid "+BR} onBlur={e=>e.target.style.border="1px solid transparent"}/>
                       {a.email&&<div style={{fontFamily:ff,fontSize:10,color:MU,paddingLeft:7}}>{a.email}</div>}
+                      {a.manual&&<div style={{fontFamily:ff,fontSize:9,color:A,paddingLeft:7,letterSpacing:0.6,textTransform:"uppercase"}}>added by hand</div>}
                     </td>
                     <td style={{...td,textAlign:"right",color:MU}}>{m.clicks}</td>
                     <td style={{...td,textAlign:"right",color:MU}}>{m.orders}</td>
@@ -2052,7 +2126,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
         <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase",marginTop:20,marginBottom:8}}>
           <E value={labels.sec_models} onSave={v=>labels._save("sec_models",v)} style={{fontFamily:ff,fontSize:10,color:A}}/>
         </div>
-        <Grid>{modelKeys.map(({key,label})=>opexField(key,label))}</Grid>
+        <ModelsPanel week={week} onChange={onChange}/>
 
         <Row>
           <Badge small label="Marketing Wages (counted under OPEX, shown here for context)" value={-c.marketingWagesInfo} color={MU}/>
@@ -2258,7 +2332,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
           <Row>
             <Badge small label="Commissions" value={-c.totalCommissions} color={RD}/>
             <Badge small label="Retainer Fees" value={-c.totalRetainer} color={RD}/>
-            <Badge small label="Models" value={-n(week.opex?.model_wages||0)} color={RD}/>
+            <Badge small label="Models" value={-modelsTotal(getModelRows(week))} color={RD}/>
           </Row>
           <Row>
             <Badge small label="Marketing Wages (in OPEX, context only)" value={-c.marketingWagesInfo} color={MU}/>
