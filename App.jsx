@@ -160,6 +160,8 @@ const DEFAULT_LABELS = {
   disc_section_sub:"Reclassifies discount codes into true cost categories. Gross Discounts above shows all codes combined. Expand below to break them out correctly.",
   disc_service_recovery:"Service Recovery",
   disc_service_recovery_sub:"Reshipments, exchanges, warranty, CS errors. Reclassified as operational/COGS expense.",
+  sec_marketing:"Marketing", sec_marketing_sub:"All marketing spend - collaborators, influencers, ad spend and model bookings. Separate from general operating expenses.",
+  sec_collab_spend:"Collaboration Spend", sec_ad_spend:"Ad Spend", sec_models:"Models",
   disc_marketing:"Marketing / Influencer",
   disc_marketing_sub:"Collab codes, gifting. Reclassified as marketing expense.",
   disc_staff:"Staff Discounts",
@@ -494,6 +496,14 @@ function calcWeek(week,fixed,opexKeys,depts,contractors){
   const totalMarketingAdSpend=getO("google_ads")+getO("meta_ads");
   const giftingCOGS=getO("collab_product_cogs");
   const giftingShipping=getO("collab_shipping");
+  // Marketing is now a top-level expense section sitting alongside OPEX rather than inside it.
+  // marketingSection = ad spend + model bookings + gifting + commissions + retainer.
+  // opexExclMarketing = everything else (freight, rent/fixed, software, wages).
+  // COGS + opexExclMarketing + marketingSection === totalExpenses, so net profit is unchanged.
+  const marketingSection=totalMarketing+totalCollabs;
+  const opexExclMarketing=totalOPEX-marketingSection;
+  // Informational only - marketing wages stay inside the Wages section and inside opexExclMarketing.
+  const marketingWagesInfo=n(week.wages?.marketing_dept||0)+n(week.wages?.super_marketing||0)+(contractorDeptAllocations["marketing_dept"]||0);
 
   const totalExpenses=totalCOGS+totalOPEX; // totalWages already included in totalOPEX above
   const netProfit=netRevenue-totalExpenses;
@@ -502,6 +512,7 @@ function calcWeek(week,fixed,opexKeys,depts,contractors){
   return {
     totalOpexExclWages, reclassifiedToExpenses, giftingCOGS, giftingShipping,
     totalGifting, totalCommissions, totalRetainer, totalRentFixed, totalSoftware, totalMarketing, totalMarketingAdSpend,
+    marketingSection, opexExclMarketing, marketingWagesInfo,
     netRevenue, totalCOGS, grossProfit, grossMargin, totalOPEX, totalWages,
     totalFreight, totalCollabs, totalExpenses, netProfit, netMargin,
     mfgP, mfgS, satchel, otherPkg, ppFees, refunds,
@@ -534,12 +545,13 @@ function calcMonth(weeks,fixed,extras,opexKeys,depts,contractors){
   const giftingCOGS=sum("giftingCOGS"), giftingShipping=sum("giftingShipping"), totalContractorWages=sum("totalContractorWages");
   const totalGifting=sum("totalGifting"), totalCommissions=sum("totalCommissions"), totalRetainer=sum("totalRetainer");
   const totalRentFixed=sum("totalRentFixed"), totalSoftware=sum("totalSoftware"), totalMarketing=sum("totalMarketing"), totalMarketingAdSpend=sum("totalMarketingAdSpend");
+  const marketingSection=sum("marketingSection"), marketingWagesInfo=sum("marketingWagesInfo");
   const discReclass={serviceRecoveryCOGS:sumDR("serviceRecoveryCOGS"), marketingDisc:sumDR("marketingDisc"), staffDisc:sumDR("staffDisc")};
   const totalOPEX=sum("totalOPEX")+extraOpex;
   const totalExpenses=sum("totalExpenses")+extraOpex;
   const netProfit=netRevenue-totalExpenses;
   const netMargin=netRevenue>0?(netProfit/netRevenue)*100:0;
-  return {netRevenue,totalCOGS,grossProfit,grossMargin,totalFreight,totalCollabs,totalWages,totalOPEX,totalExpenses,netProfit,netMargin,weekCalcs:wc,extraOpex,totalOpexExclWages,reclassifiedToExpenses,giftingCOGS,giftingShipping,totalContractorWages,totalGifting,totalCommissions,totalRetainer,totalRentFixed,totalSoftware,totalMarketing,totalMarketingAdSpend,discReclass};
+  return {netRevenue,totalCOGS,grossProfit,grossMargin,totalFreight,totalCollabs,totalWages,totalOPEX,totalExpenses,netProfit,netMargin,weekCalcs:wc,extraOpex,totalOpexExclWages,reclassifiedToExpenses,giftingCOGS,giftingShipping,totalContractorWages,totalGifting,totalCommissions,totalRetainer,totalRentFixed,totalSoftware,totalMarketing,totalMarketingAdSpend,marketingSection,marketingWagesInfo,opexExclMarketing:sum("totalOPEX")+extraOpex-marketingSection,discReclass};
 }
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
@@ -1914,7 +1926,9 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
   const freightKeys=keys.filter(k=>k.group==="freight");
   const collabKeys=keys.filter(k=>["gifting","commissions","retainer"].includes(k.group));
       const generalKeys=keys.filter(k=>["rent_fixed","software"].includes(k.group));
-      const marketingAdKeys=keys.filter(k=>k.group==="marketing");
+      const marketingAdKeys=keys.filter(k=>k.group==="marketing"&&k.key!=="model_wages");
+      const modelKeys=keys.filter(k=>k.key==="model_wages");
+      const marketingAllKeys=keys.filter(k=>["gifting","commissions","retainer","marketing"].includes(k.group));
 
   const renameOpex=(key,nl)=>{if(onSettingsChange){const nk=(settings?.opexKeys||keys).map(k=>k.key===key?{...k,label:nl}:k);onSettingsChange({...settings,opexKeys:nk});}};
   const renameDept=(dk,nl)=>{if(onSettingsChange){const nd=(settings?.wageDepts||wDepts).map(d=>d.key===dk?{...d,label:nl}:d);onSettingsChange({...settings,wageDepts:nd});}};
@@ -2002,6 +2016,46 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
         <Pct small label={<E value={labels.field_gross_margin} onSave={v=>labels._save("field_gross_margin",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>} value={c.grossMargin}/>
       </Row>
 
+      {/* ── MARKETING (top-level section, sits above OPEX) ───────────────────── */}
+      <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between"}}>
+        <div style={{flex:1}}><SH><E value={labels.sec_marketing} onSave={v=>labels._save("sec_marketing",v)} style={{color:"inherit",fontFamily:ff}}/></SH></div>
+        <div style={{paddingBottom:14}}><ClearBtn label="Marketing section" onClear={()=>{
+          const cleared={...week.opex};
+          marketingAllKeys.forEach(({key})=>{cleared[key]="";});
+          onChange({...week,opex:cleared});
+        }}/></div>
+      </div>
+      <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:14,paddingLeft:16}}><E value={labels.sec_marketing_sub} onSave={v=>labels._save("sec_marketing_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}} multiline/></div>
+
+      <div style={{paddingLeft:16,borderLeft:"2px solid "+A+"22",marginTop:10}}>
+        <SH sub><E value={labels.sec_collabs} onSave={v=>labels._save("sec_collabs",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
+        <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_collabs_sub} onSave={v=>labels._save("sec_collabs_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
+
+        <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase",marginTop:14,marginBottom:8}}>
+          <E value={labels.sec_collab_spend} onSave={v=>labels._save("sec_collab_spend",v)} style={{fontFamily:ff,fontSize:10,color:A}}/>
+        </div>
+        <Grid>{collabKeys.map(({key,label})=>opexField(key,label))}</Grid>
+        <Row><Badge small label="Total Collaboration Spend" value={-c.totalCollabs} color={RD}/></Row>
+        <AffiliatePanel week={week} onChange={onChange} defaultMargin={c.grossMargin}/>
+
+        <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase",marginTop:20,marginBottom:8}}>
+          <E value={labels.sec_ad_spend} onSave={v=>labels._save("sec_ad_spend",v)} style={{fontFamily:ff,fontSize:10,color:A}}/>
+        </div>
+        <Grid>{marketingAdKeys.map(({key,label})=>opexField(key,label))}</Grid>
+        <Row><Badge small label="Total Ad Spend (Google + Meta)" value={-c.totalMarketingAdSpend} color={RD}/></Row>
+
+        <div style={{fontFamily:ff,fontSize:10,color:A,letterSpacing:1.5,textTransform:"uppercase",marginTop:20,marginBottom:8}}>
+          <E value={labels.sec_models} onSave={v=>labels._save("sec_models",v)} style={{fontFamily:ff,fontSize:10,color:A}}/>
+        </div>
+        <Grid>{modelKeys.map(({key,label})=>opexField(key,label))}</Grid>
+
+        <Row>
+          <Badge small label="Marketing Wages (counted under OPEX, shown here for context)" value={-c.marketingWagesInfo} color={MU}/>
+          <Badge small label="Gifting Retail Given Away (context only, not a cost)" value={-(c.discReclass?.marketingDisc||0)} color={MU}/>
+        </Row>
+        <Row><Badge small label="TOTAL MARKETING" value={-c.marketingSection} color={RD}/></Row>
+      </div>
+
       <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between"}}>
         <div style={{flex:1}}><SH><E value={labels.sec_opex} onSave={v=>labels._save("sec_opex",v)} style={{color:"inherit",fontFamily:ff}}/></SH></div>
         <div style={{paddingBottom:14}}><ClearBtn label="OPEX section" onClear={()=>onChange({...week,opex:emptyOpex(keys),wages:emptyWages(wDepts)})} /></div>
@@ -2038,19 +2092,6 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
         })()}
         <Grid>{freightKeys.filter(k=>!k.sub&&!k.computed&&k.key!=="auspost").map(({key,label})=>opexField(key,label))}</Grid>
         <Row><Badge small label="Total Freight" value={-c.totalFreight} color={RD}/></Row>
-
-        <SH sub><E value={labels.sec_collabs} onSave={v=>labels._save("sec_collabs",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
-        <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_collabs_sub} onSave={v=>labels._save("sec_collabs_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
-        <Grid>{marketingAdKeys.map(({key,label})=>opexField(key,label))}</Grid>
-        <Grid>{collabKeys.map(({key,label})=>opexField(key,label))}</Grid>
-        <Row><Badge small label="Marketing Dept Wages (see Staff Wages below)" value={-n(week.wages?.marketing_dept||0)} color={RD}/></Row>
-        <Row><Badge small label="Total Ad Spend (Google + Meta)" value={-c.totalMarketingAdSpend} color={RD}/></Row>
-        <Row><Badge small label="Total Gifting (COGS + Shipping)" value={-c.totalGifting} color={RD}/></Row>
-        <Row><Badge small label="Total Commissions" value={-c.totalCommissions} color={RD}/></Row>
-        <Row><Badge small label="Total Retainer Fees" value={-c.totalRetainer} color={RD}/></Row>
-        <Row><Badge small label="Influencer / Marketing Gifting (reclassified, informational only)" value={-(c.discReclass?.marketingDisc||0)} color={RD}/></Row>
-        <Row><Badge small label="Total Marketing" value={-(c.totalMarketing+c.totalCollabs)} color={RD}/></Row>
-        <AffiliatePanel week={week} onChange={onChange} defaultMargin={c.grossMargin}/>
 
         <SH sub><E value={labels.sec_wages} onSave={v=>labels._save("sec_wages",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
         <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_wages_sub} onSave={v=>labels._save("sec_wages_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
@@ -2159,7 +2200,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
         )}
 
 <Accordion title={labels.sec_general} defaultOpen={false}><Grid>{generalKeys.map(({key,label})=>opexField(key,label))}</Grid></Accordion>
-        <Row><Badge small label="Total OPEX" value={-c.totalOPEX} color={RD}/></Row>
+        <Row><Badge small label="TOTAL OPEX (excl. Marketing)" value={-c.opexExclMarketing} color={RD}/></Row>
       </div>
 
       <div style={{borderTop:"2px solid "+A+"44",marginTop:28,paddingTop:20}}>
@@ -2168,31 +2209,61 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
         </div>
         <Row>
           <Badge label={<E value={labels.field_net_revenue} onSave={v=>labels._save("field_net_revenue",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>} value={c.netRevenue} color={A}/>
-          <Badge label={<E value={labels.field_total_expenses} onSave={v=>labels._save("field_total_expenses",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>} value={-c.totalExpenses} color={RD}/>
           <Badge label={<E value={labels.field_net_profit} onSave={v=>labels._save("field_net_profit",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>} value={c.netProfit}/>
           <Pct label={<E value={labels.field_net_margin} onSave={v=>labels._save("field_net_margin",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>} value={c.netMargin}/>
         </Row>
-        {/* Targets vs actuals inline */}
-        <TargetsPanel calc={c} week={week} labels={labels}/>
-        <div style={{marginTop:16}}>
-          <div style={{fontFamily:ff,fontSize:10,letterSpacing:2,color:A,textTransform:"uppercase",marginBottom:10}}>OPEX & Marketing Breakdown</div>
+
+        {/* 1. Expense components rolling up into Total Expenses */}
+        <div style={{marginTop:18}}>
+          <div style={{fontFamily:ff,fontSize:9,letterSpacing:1.5,color:MU,textTransform:"uppercase",marginBottom:8,paddingLeft:14,borderLeft:"2px solid "+MU+"44"}}>Rolls up into Total Expenses</div>
           <Row>
-            <Badge small label="Freight" value={-c.totalFreight} color={RD}/>
-            <Badge small label="Gifting COGS" value={-c.giftingCOGS} color={RD}/>
-            <Badge small label="Gifting Shipping" value={-c.giftingShipping} color={RD}/>
-            <Badge small label="Commissions" value={-c.totalCommissions} color={RD}/>
-          </Row>
-          <Row>
-            <Badge small label="Retainer Fees" value={-c.totalRetainer} color={RD}/>
-            <Badge small label="Rent + Utilities + Fixed" value={-c.totalRentFixed} color={RD}/>
-            <Badge small label="Software + Subscriptions" value={-c.totalSoftware} color={RD}/>
-            <Badge small label={"Marketing (Ads: "+fmtD(c.totalMarketingAdSpend)+")"} value={-c.totalMarketing} color={RD}/>
-          </Row>
-          <Row>
-            <Badge small label="Total OPEX (excl. Wages)" value={-c.totalOpexExclWages} color={RD}/>
-            <Badge small label="Reclassified to Expenses" value={-c.reclassifiedToExpenses} color={YL}/>
+            <Badge small label="Total COGS" value={-c.totalCOGS} color={RD}/>
+            <Badge small label="Total OPEX" value={-c.opexExclMarketing} color={RD}/>
+            <Badge small label="Total Marketing" value={-c.marketingSection} color={RD}/>
           </Row>
         </div>
+
+        {/* 2. Total Expenses */}
+        <Row>
+          <Badge label={<E value={labels.field_total_expenses} onSave={v=>labels._save("field_total_expenses",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/>} value={-c.totalExpenses} color={RD}/>
+        </Row>
+
+        {/* 3. Breakdown summaries */}
+        <div style={{marginTop:18}}>
+          <div style={{fontFamily:ff,fontSize:10,letterSpacing:2,color:A,textTransform:"uppercase",marginBottom:10}}>OPEX Breakdown</div>
+          <Row>
+            <Badge small label="Freight" value={-c.totalFreight} color={RD}/>
+            <Badge small label="Rent + Utilities + Fixed" value={-c.totalRentFixed} color={RD}/>
+            <Badge small label="Software + Subscriptions" value={-c.totalSoftware} color={RD}/>
+          </Row>
+          <Row>
+            <Badge small label="Staff Wages" value={-(c.totalWages-c.totalContractorWages)} color={RD}/>
+            <Badge small label="Contractors" value={-c.totalContractorWages} color={RD}/>
+            <Badge small label="TOTAL OPEX" value={-c.opexExclMarketing} color={RD}/>
+          </Row>
+        </div>
+
+        <div style={{marginTop:18}}>
+          <div style={{fontFamily:ff,fontSize:10,letterSpacing:2,color:A,textTransform:"uppercase",marginBottom:10}}>Marketing Breakdown</div>
+          <Row>
+            <Badge small label="Ad Spend (Google + Meta)" value={-c.totalMarketingAdSpend} color={RD}/>
+            <Badge small label="Gifting COGS" value={-c.giftingCOGS} color={RD}/>
+            <Badge small label="Gifting Shipping" value={-c.giftingShipping} color={RD}/>
+          </Row>
+          <Row>
+            <Badge small label="Commissions" value={-c.totalCommissions} color={RD}/>
+            <Badge small label="Retainer Fees" value={-c.totalRetainer} color={RD}/>
+            <Badge small label="Models" value={-n(week.opex?.model_wages||0)} color={RD}/>
+          </Row>
+          <Row>
+            <Badge small label="Marketing Wages (in OPEX, context only)" value={-c.marketingWagesInfo} color={MU}/>
+            <Badge small label="Reclassified to Expenses" value={-c.reclassifiedToExpenses} color={YL}/>
+            <Badge small label="TOTAL MARKETING" value={-c.marketingSection} color={RD}/>
+          </Row>
+        </div>
+
+        {/* 4. Targets */}
+        <TargetsPanel calc={c} week={week} labels={labels}/>
       </div>
       <SH><E value={labels.sec_notes} onSave={v=>labels._save("sec_notes",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
       <textarea value={week.notes} onChange={e=>onChange({...week,notes:sanitize.text(e.target.value)})} placeholder="Unusual costs, one-offs, events..." rows={3}
@@ -2611,7 +2682,8 @@ function FixedCostsPage({fixed,onChange,opexKeys,settings,onSettingsChange,label
       </div>
       {renderGroup(displayKeys.filter(k=>k.group==="freight"),"sec_freight",part)}
       {renderGroup(displayKeys.filter(k=>["gifting","commissions","retainer"].includes(k.group)),"sec_collabs",part)}
-      {renderGroup(displayKeys.filter(k=>["rent_fixed","software","marketing"].includes(k.group)),"sec_general",part)}
+      {renderGroup(displayKeys.filter(k=>k.group==="marketing"),"sec_marketing",part)}
+      {renderGroup(displayKeys.filter(k=>["rent_fixed","software"].includes(k.group)),"sec_general",part)}
     </div>
   );
 
