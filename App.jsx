@@ -145,8 +145,7 @@ const DEFAULT_LABELS = {
   sec_opex:"OPEX - Operating Expenses",
   sec_opex_sub:"All operating costs including freight, collabs, and wages. Tinted fields are pre-filled from Fixed Costs.",
   sec_freight:"Customer Shipping and Freight", sec_freight_sub:"Freight costs - included in total OPEX above.",
-  sec_collabs:"Collaborations and Influencers", sec_collabs_sub:"Full cost breakdown per collaboration.",
-  sec_wages:"Staff Wages - By Department", sec_wages_sub:"Wages by department - included in total OPEX above.",
+  sec_collabs:"Marketing", sec_collabs_sub:"Ad spend, marketing dept wages, gifting, commissions and retainer fees - grouped separately from general operating costs.",sec_wages:"Staff Wages - By Department", sec_wages_sub:"Wages by department - included in total OPEX above.",
   sec_general:"General Operating Costs", sec_notes:"Notes / Context", sec_summary:"Weekly P&L Summary",
   field_gross_sales:"Gross Sales", field_refunds:"Refunds / Returns",
   field_discounts:"Gross Discounts (all codes)", field_shipping_income:"Shipping Income",
@@ -1630,6 +1629,274 @@ function ClearAll({onClear}){
 }
 
 // ─── Week Form ────────────────────────────────────────────────────────────────
+// ─── Affiliate Performance (UpPromote import) ─────────────────────────────────
+const AFF_SHEET_CDN="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+let _affSheetPromise=null;
+function loadSheetJS(){
+  if(typeof window!=="undefined"&&window.XLSX)return Promise.resolve(window.XLSX);
+  if(_affSheetPromise)return _affSheetPromise;
+  _affSheetPromise=new Promise((res,rej)=>{
+    const s=document.createElement("script");
+    s.src=AFF_SHEET_CDN;
+    s.onload=()=>window.XLSX?res(window.XLSX):rej(new Error("Spreadsheet reader loaded but did not start."));
+    s.onerror=()=>{_affSheetPromise=null;rej(new Error("Could not load the spreadsheet reader. Export the file as CSV from UpPromote and try again."));};
+    document.head.appendChild(s);
+  });
+  return _affSheetPromise;
+}
+
+const AFF_HEADERS={
+  name:["affiliatename","name","affiliate","fullname"],
+  email:["email","emailaddress"],
+  clicks:["clicks","totalclicks"],
+  orders:["totalreferrals","referrals","orders","totalorders","conversions"],
+  sales:["totalsales","sales","revenue","totalrevenue"],
+  comm:["totalcommissions","totalcommission","commissions","commission"],
+};
+const affNorm=h=>String(h==null?"":h).toLowerCase().replace(/[^a-z0-9]/g,"");
+const affNum=v=>{const p=parseFloat(String(v==null?"":v).replace(/[^0-9.-]/g,""));return isNaN(p)?0:p;};
+
+function affMapHeaders(headerRow){
+  const map={};
+  (headerRow||[]).forEach((h,i)=>{
+    const k=affNorm(h);
+    Object.keys(AFF_HEADERS).forEach(field=>{
+      if(map[field]===undefined&&AFF_HEADERS[field].indexOf(k)>=0)map[field]=i;
+    });
+  });
+  return map;
+}
+
+function affRowsFromMatrix(matrix){
+  if(!matrix||!matrix.length)throw new Error("That file looks empty.");
+  let hi=-1,map={};
+  for(let i=0;i<Math.min(matrix.length,10);i++){
+    const m=affMapHeaders(matrix[i]);
+    if(m.name!==undefined&&(m.sales!==undefined||m.comm!==undefined)){hi=i;map=m;break;}
+  }
+  if(hi<0)throw new Error("Could not find the affiliate columns. The file needs a header row with affiliate_name and total_sales.");
+  const out=[];
+  for(let i=hi+1;i<matrix.length;i++){
+    const r=matrix[i]||[];
+    const nm=sanitize.text(r[map.name]).trim();
+    if(!nm)continue;
+    out.push({
+      id:"aff_"+i+"_"+Math.random().toString(36).slice(2,7),
+      name:nm,
+      email:map.email!==undefined?sanitize.text(r[map.email]).trim():"",
+      clicks:String(affNum(r[map.clicks])),
+      orders:String(affNum(r[map.orders])),
+      sales:String(affNum(r[map.sales])),
+      comm:String(affNum(r[map.comm])),
+      gift:"",retainer:"",
+    });
+  }
+  if(!out.length)throw new Error("Found the header row but no affiliate rows underneath it.");
+  return out;
+}
+
+function affParseCSV(text){
+  const rows=[];let row=[],cur="",q=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(q){
+      if(ch==='"'){if(text[i+1]==='"'){cur+='"';i++;}else q=false;}
+      else cur+=ch;
+    }
+    else if(ch==='"')q=true;
+    else if(ch===","){row.push(cur);cur="";}
+    else if(ch==="\n"){row.push(cur);rows.push(row);row=[];cur="";}
+    else if(ch!=="\r")cur+=ch;
+  }
+  if(cur!==""||row.length){row.push(cur);rows.push(row);}
+  return rows;
+}
+
+// Re-importing keeps any gifting or retainer cost already typed against that person
+function affMerge(existing,incoming){
+  const keyOf=a=>((a.email||"").toLowerCase())||affNorm(a.name);
+  const byKey={};
+  (existing||[]).forEach(a=>{byKey[keyOf(a)]=a;});
+  return incoming.map(a=>{
+    const p=byKey[keyOf(a)];
+    return p?{...a,id:p.id,gift:p.gift||"",retainer:p.retainer||""}:a;
+  });
+}
+
+// Contribution uses gross margin, not raw sales - $500 of sales at 55% margin is $275 of value
+function calcAffiliate(a,marginPct){
+  const sales=n(a.sales),comm=n(a.comm),gift=n(a.gift),ret=n(a.retainer);
+  const cost=comm+gift+ret;
+  const contribution=sales*(marginPct/100);
+  const net=contribution-cost;
+  return {sales,comm,gift,ret,cost,contribution,net,roi:cost>0?(net/cost)*100:null,orders:n(a.orders),clicks:n(a.clicks)};
+}
+
+function AffiliatePanel({week,onChange,defaultMargin}){
+  const {S,S2,BR,A,MU,RD,GR,YL,TX,ff,radius}=useTheme();
+  const bi=useBI();
+  const [err,setErr]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [showAll,setShowAll]=useState(false);
+  const fileRef=useRef(null);
+
+  const list=week.affiliates||[];
+  const mRaw=week.affiliateMargin;
+  const marginPct=(mRaw===""||mRaw===undefined||mRaw===null)?(defaultMargin||0):n(mRaw);
+  const usingDefaultMargin=(mRaw===""||mRaw===undefined||mRaw===null);
+
+  const setList=v=>onChange({...week,affiliates:v});
+  const upA=(id,field,val)=>setList(list.map(a=>a.id===id?{...a,[field]:val}:a));
+  const rmA=id=>setList(list.filter(a=>a.id!==id));
+  const addRow=()=>setList([...list,{id:"aff_"+Date.now()+"_"+Math.random().toString(36).slice(2,7),name:"",email:"",clicks:"",orders:"",sales:"",comm:"",gift:"",retainer:""}]);
+
+  const handleFile=async e=>{
+    const f=e.target.files&&e.target.files[0];
+    e.target.value="";
+    if(!f)return;
+    setErr("");setBusy(true);
+    try{
+      let matrix;
+      if(/\.csv$/i.test(f.name)){
+        matrix=affParseCSV(await f.text());
+      }else{
+        const XLSX=await loadSheetJS();
+        const wb=XLSX.read(new Uint8Array(await f.arrayBuffer()),{type:"array"});
+        matrix=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:true,defval:""});
+      }
+      setList(affMerge(list,affRowsFromMatrix(matrix)));
+    }catch(ex){
+      setErr(ex&&ex.message?ex.message:"Could not read that file.");
+    }
+    setBusy(false);
+  };
+
+  const rows=useMemo(()=>list.map(a=>({a,m:calcAffiliate(a,marginPct)})).sort((x,y)=>y.m.sales-x.m.sales||y.m.cost-x.m.cost),[list,marginPct]);
+  const active=rows.filter(r=>r.m.sales>0||r.m.cost>0);
+  const dormant=rows.filter(r=>!(r.m.sales>0||r.m.cost>0));
+  const shown=showAll?rows:active;
+
+  const T=rows.reduce((s,r)=>({
+    sales:s.sales+r.m.sales,orders:s.orders+r.m.orders,clicks:s.clicks+r.m.clicks,
+    comm:s.comm+r.m.comm,gift:s.gift+r.m.gift,ret:s.ret+r.m.ret,
+    cost:s.cost+r.m.cost,contribution:s.contribution+r.m.contribution,net:s.net+r.m.net,
+  }),{sales:0,orders:0,clicks:0,comm:0,gift:0,ret:0,cost:0,contribution:0,net:0});
+  const totalROI=T.cost>0?(T.net/T.cost)*100:null;
+
+  const th={fontFamily:ff,fontSize:9,letterSpacing:1,textTransform:"uppercase",color:MU,textAlign:"left",padding:"6px 6px",borderBottom:"1px solid "+BR,whiteSpace:"nowrap"};
+  const td={fontFamily:ff,fontSize:12,color:TX,padding:"5px 6px",borderBottom:"1px solid "+BR+"44",verticalAlign:"middle"};
+  const btn={padding:"8px 14px",background:"transparent",border:"1px solid "+A,color:A,fontFamily:ff,fontSize:11,cursor:"pointer",letterSpacing:1.5,textTransform:"uppercase",borderRadius:radius};
+  const roiCol=v=>v===null?MU:(v>=0?GR:RD);
+  const roiTxt=v=>v===null?"-":(v>=0?"+":"")+v.toFixed(0)+"%";
+
+  return(
+    <Accordion title="Affiliate Performance (UpPromote)">
+      <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:12,lineHeight:1.6}}>
+        Import the Top Affiliates export from UpPromote for this week's date range. Sales and commissions come from the file; gifting cost and retainer are yours to fill in for the few people they apply to. Anyone left blank is treated as costing commission only.
+      </div>
+
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} style={{display:"none"}}/>
+        <button onClick={()=>fileRef.current&&fileRef.current.click()} disabled={busy} style={{...btn,opacity:busy?0.5:1}}>
+          {busy?"Reading...":(list.length?"Re-import file":"Import UpPromote file")}
+        </button>
+        <button onClick={addRow} style={{...btn,borderColor:BR,color:MU}}>Add row manually</button>
+        {list.length>0&&<button onClick={()=>{if(window.confirm("Clear all affiliate rows for this week?"))setList([]);}} style={{...btn,borderColor:RD+"88",color:RD}}>Clear</button>}
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontFamily:ff,fontSize:11,color:MU}}>Gross margin</span>
+          <input type="number" value={mRaw===undefined||mRaw===null?"":mRaw} placeholder={String((defaultMargin||0).toFixed(1))}
+            onChange={e=>onChange({...week,affiliateMargin:e.target.value})}
+            style={{...bi,width:80,padding:"6px 8px",fontSize:12}}/>
+          <span style={{fontFamily:ff,fontSize:11,color:MU}}>%{usingDefaultMargin?" (this week's actual)":""}</span>
+        </div>
+      </div>
+
+      {err&&<div style={{fontFamily:ff,fontSize:11,color:RD,marginTop:10,background:RD+"14",border:"1px solid "+RD+"55",padding:"8px 10px",borderRadius:radius}}>{err}</div>}
+
+      {list.length===0&&!err&&(
+        <div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:14,fontStyle:"italic"}}>No affiliates imported for this week yet.</div>
+      )}
+
+      {list.length>0&&(
+        <div>
+          <Row>
+            <Badge small label="Affiliate Sales" value={T.sales} color={GR}/>
+            <Badge small label={"Gross Profit @ "+marginPct.toFixed(1)+"%"} value={T.contribution} color={GR}/>
+            <Badge small label="Total Affiliate Cost" value={-T.cost} color={RD}/>
+            <Badge small label="Net Contribution" value={T.net} color={T.net>=0?GR:RD}/>
+            <Badge small label="Blended ROI" value={roiTxt(totalROI)} color={roiCol(totalROI)}/>
+          </Row>
+          <Row>
+            <Badge small label="Earning" value={String(active.filter(r=>r.m.sales>0).length)+" of "+rows.length} color={A}/>
+            <Badge small label="Total Clicks" value={String(T.clicks)} color={MU}/>
+            <Badge small label="Total Orders" value={String(T.orders)} color={MU}/>
+            <Badge small label="Commissions" value={-T.comm} color={RD}/>
+            <Badge small label="Gifting + Retainer" value={-(T.gift+T.ret)} color={RD}/>
+          </Row>
+
+          <div style={{overflowX:"auto",marginTop:16}}>
+            <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
+              <thead>
+                <tr>
+                  <th style={th}>Affiliate</th>
+                  <th style={{...th,textAlign:"right"}}>Clicks</th>
+                  <th style={{...th,textAlign:"right"}}>Orders</th>
+                  <th style={{...th,textAlign:"right"}}>Sales</th>
+                  <th style={{...th,textAlign:"right"}}>Commission</th>
+                  <th style={{...th,width:110}}>Gifting cost</th>
+                  <th style={{...th,width:110}}>Retainer</th>
+                  <th style={{...th,textAlign:"right"}}>Net</th>
+                  <th style={{...th,textAlign:"right"}}>ROI</th>
+                  <th style={th}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map(({a,m})=>(
+                  <tr key={a.id} style={{background:m.sales>0?"transparent":MU+"0d"}}>
+                    <td style={{...td,minWidth:170}}>
+                      <input value={a.name} onChange={e=>upA(a.id,"name",sanitize.text(e.target.value))}
+                        style={{...bi,padding:"5px 7px",fontSize:12,background:"transparent",border:"1px solid transparent"}}
+                        onFocus={e=>e.target.style.border="1px solid "+BR} onBlur={e=>e.target.style.border="1px solid transparent"}/>
+                      {a.email&&<div style={{fontFamily:ff,fontSize:10,color:MU,paddingLeft:7}}>{a.email}</div>}
+                    </td>
+                    <td style={{...td,textAlign:"right",color:MU}}>{m.clicks}</td>
+                    <td style={{...td,textAlign:"right",color:MU}}>{m.orders}</td>
+                    <td style={{...td,textAlign:"right",color:m.sales>0?GR:MU}}>{fmtD(m.sales)}</td>
+                    <td style={{...td,textAlign:"right",color:m.comm>0?RD:MU}}>{fmtD(m.comm)}</td>
+                    <td style={td}><CI value={a.gift} onChange={v=>upA(a.id,"gift",sanitize.money(v))}/></td>
+                    <td style={td}><CI value={a.retainer} onChange={v=>upA(a.id,"retainer",sanitize.money(v))}/></td>
+                    <td style={{...td,textAlign:"right",color:m.cost>0?(m.net>=0?GR:RD):MU,fontWeight:"bold"}}>{m.cost>0||m.sales>0?fmtD(m.net):"-"}</td>
+                    <td style={{...td,textAlign:"right",color:roiCol(m.roi),fontWeight:"bold"}}>{roiTxt(m.roi)}</td>
+                    <td style={{...td,textAlign:"right"}}>
+                      <button onClick={()=>rmA(a.id)} title="Remove row"
+                        style={{background:"transparent",border:"none",color:MU,cursor:"pointer",fontFamily:ff,fontSize:14,padding:"0 4px"}}>x</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {dormant.length>0&&(
+            <div style={{fontFamily:ff,fontSize:11,color:MU,marginTop:10}}>
+              {showAll
+                ?<span>Showing all {rows.length}. </span>
+                :<span>{dormant.length} affiliate{dormant.length===1?"":"s"} with no sales and no cost {dormant.length===1?"is":"are"} hidden. </span>}
+              <button onClick={()=>setShowAll(!showAll)} style={{background:"transparent",border:"none",color:A,cursor:"pointer",fontFamily:ff,fontSize:11,textDecoration:"underline",padding:0}}>
+                {showAll?"Hide them":"Show them"}
+              </button>
+            </div>
+          )}
+
+          <div style={{fontFamily:ff,fontSize:10,color:MU,marginTop:12,lineHeight:1.6,borderTop:"1px solid "+BR+"44",paddingTop:10}}>
+            ROI here is net contribution divided by what the affiliate cost you, using gross margin rather than raw sales. Ignore UpPromote's own ROI column; it only ever restates the commission rate and counts no gifting or retainer spend.
+          </div>
+        </div>
+      )}
+    </Accordion>
+  );
+}
+
 function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,labels,contractors}){
   const {S,S2,BR,A,MU,YL,RD,GR,TX,ff,radius}=useTheme();
   const keys=opexKeys||DEFAULT_OPEX_KEYS;
@@ -1646,7 +1913,8 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
   const satchelCost=week.cogs.satchel_cost_each||fixed?.satchelCostDefault||"0.85";
   const freightKeys=keys.filter(k=>k.group==="freight");
   const collabKeys=keys.filter(k=>["gifting","commissions","retainer"].includes(k.group));
-  const generalKeys=keys.filter(k=>["rent_fixed","software","marketing"].includes(k.group));
+      const generalKeys=keys.filter(k=>["rent_fixed","software"].includes(k.group));
+      const marketingAdKeys=keys.filter(k=>k.group==="marketing");
 
   const renameOpex=(key,nl)=>{if(onSettingsChange){const nk=(settings?.opexKeys||keys).map(k=>k.key===key?{...k,label:nl}:k);onSettingsChange({...settings,opexKeys:nk});}};
   const renameDept=(dk,nl)=>{if(onSettingsChange){const nd=(settings?.wageDepts||wDepts).map(d=>d.key===dk?{...d,label:nl}:d);onSettingsChange({...settings,wageDepts:nd});}};
@@ -1773,9 +2041,16 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
 
         <SH sub><E value={labels.sec_collabs} onSave={v=>labels._save("sec_collabs",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
         <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_collabs_sub} onSave={v=>labels._save("sec_collabs_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
+        <Grid>{marketingAdKeys.map(({key,label})=>opexField(key,label))}</Grid>
         <Grid>{collabKeys.map(({key,label})=>opexField(key,label))}</Grid>
-        <Row><Badge small label="Influencer / Marketing Gifting (reclassified)" value={-(c.discReclass?.marketingDisc||0)} color={RD}/></Row>
-        <Row><Badge small label="Total Collabs" value={-c.totalCollabs} color={RD}/></Row>
+        <Row><Badge small label="Marketing Dept Wages (see Staff Wages below)" value={-n(week.wages?.marketing_dept||0)} color={RD}/></Row>
+        <Row><Badge small label="Total Ad Spend (Google + Meta)" value={-c.totalMarketingAdSpend} color={RD}/></Row>
+        <Row><Badge small label="Total Gifting (COGS + Shipping)" value={-c.totalGifting} color={RD}/></Row>
+        <Row><Badge small label="Total Commissions" value={-c.totalCommissions} color={RD}/></Row>
+        <Row><Badge small label="Total Retainer Fees" value={-c.totalRetainer} color={RD}/></Row>
+        <Row><Badge small label="Influencer / Marketing Gifting (reclassified, informational only)" value={-(c.discReclass?.marketingDisc||0)} color={RD}/></Row>
+        <Row><Badge small label="Total Marketing" value={-(c.totalMarketing+c.totalCollabs)} color={RD}/></Row>
+        <AffiliatePanel week={week} onChange={onChange} defaultMargin={c.grossMargin}/>
 
         <SH sub><E value={labels.sec_wages} onSave={v=>labels._save("sec_wages",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
         <div style={{fontFamily:ff,fontSize:11,color:MU,marginBottom:10}}><E value={labels.sec_wages_sub} onSave={v=>labels._save("sec_wages_sub",v)} style={{color:MU,fontFamily:ff,fontSize:11}}/></div>
@@ -1883,8 +2158,7 @@ function WeekForm({week,onChange,fixed,opexKeys,depts,settings,onSettingsChange,
           </div>
         )}
 
-        <SH sub><E value={labels.sec_general} onSave={v=>labels._save("sec_general",v)} style={{color:"inherit",fontFamily:ff}}/></SH>
-        <Grid>{generalKeys.map(({key,label})=>opexField(key,label))}</Grid>
+<Accordion title={labels.sec_general} defaultOpen={false}><Grid>{generalKeys.map(({key,label})=>opexField(key,label))}</Grid></Accordion>
         <Row><Badge small label="Total OPEX" value={-c.totalOPEX} color={RD}/></Row>
       </div>
 
